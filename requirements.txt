@@ -1,0 +1,13 @@
+python-dotenv
+langchain
+langchain-anthropic
+langchain-openai
+langchain-google-genai
+langchain-groq
+chromadb
+fastapi
+uvicorn
+deepgram-sdk 
+elevenlabs 
+websockets 
+openai
