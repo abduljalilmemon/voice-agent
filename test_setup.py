@@ -26,7 +26,7 @@ def chat(message: str, session_id: str):
 
 if __name__ == "__main__":
     session = str(uuid.uuid4())
-    print("Voice Agent Test — type 'quit' to exit\n")
+    print("Voice Agent Test -- type 'quit' to exit\n")
 
     while True:
         user_input = input("You: ").strip()

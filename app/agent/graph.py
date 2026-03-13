@@ -12,6 +12,7 @@ def build_graph():
     graph.add_node("response_generator", generate_response)
 
     graph.set_entry_point("intent_classifier")
+    
     graph.add_edge("intent_classifier", "knowledge_retriever")
     graph.add_edge("knowledge_retriever", "response_generator")
     graph.add_edge("response_generator", END)

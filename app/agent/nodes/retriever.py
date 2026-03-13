@@ -14,8 +14,8 @@ def knowledge_retriever(state: AgentState) -> AgentState:
     context = retrieve(last_message)
 
     if context:
-        print(f"  [KnowledgeRetriever] → found {len(context)} chars of context")
+        print(f"  [KnowledgeRetriever] -> found {len(context)} chars of context")
     else:
-        print(f"  [KnowledgeRetriever] → no relevant context found")
+        print(f"  [KnowledgeRetriever] -> no relevant context found")
 
     return {"context": context}
