@@ -1,0 +1,45 @@
+BUSINESS NAME: City Dental Clinic
+LOCATION: 123 Main Street, Karachi, Pakistan
+PHONE: +92-21-1234567
+EMAIL: info@citydental.com
+HOURS: Monday to Saturday, 9 AM to 7 PM. Closed on Sundays.
+
+SERVICES:
+- General checkup and cleaning: PKR 1,500
+- Teeth whitening: PKR 8,000
+- Dental filling: PKR 2,500
+- Root canal treatment: PKR 12,000
+- Tooth extraction: PKR 3,000
+- Braces consultation: PKR 500 (treatment starts from PKR 45,000)
+- Dental implants: PKR 35,000 per tooth
+
+INSURANCE:
+We accept Jubilee Insurance, EFU Health, and Adamjee Insurance.
+Patients with other insurance are welcome but must pay upfront and claim from their provider.
+
+APPOINTMENTS:
+Appointments can be booked by calling us or through our website.
+Same-day appointments are available for emergencies.
+Please arrive 10 minutes early for your first visit.
+Cancellations must be made at least 2 hours in advance.
+
+DOCTORS:
+Dr. Ayesha Khan — General Dentist, 10 years experience
+Dr. Bilal Ahmed — Orthodontist (Braces specialist), 8 years experience
+Dr. Sara Malik — Endodontist (Root canal specialist), 6 years experience
+
+FAQS:
+Q: Is parking available?
+A: Yes, free parking is available for all patients.
+
+Q: Do you treat children?
+A: Yes, we treat patients of all ages including children from age 5.
+
+Q: How long does a cleaning take?
+A: A standard cleaning takes 30 to 45 minutes.
+
+Q: Is the clinic hygienic and sterilized?
+A: All equipment is sterilized after every patient. We follow international hygiene standards.
+
+Q: What should I do in a dental emergency?
+A: Call us immediately at +92-21-1234567. We reserve slots for emergency cases daily.
