@@ -26,4 +26,4 @@ Thumbs.db
 chroma_db/
 .chroma_db/
 *.bin
-memory.db
+memory.db*
