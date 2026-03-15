@@ -27,3 +27,7 @@ chroma_db/
 .chroma_db/
 *.bin
 memory.db*
+
+*.mp3
+*.wav
+test_output.mp3

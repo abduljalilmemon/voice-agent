@@ -13,3 +13,5 @@ deepgram-sdk
 elevenlabs 
 websockets 
 openai
+deepgram-sdk 
+elevenlabs

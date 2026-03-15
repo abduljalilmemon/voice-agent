@@ -90,7 +90,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             if not message:
                 continue
 
-            print(f"  WS [{session_id[:8]}] → {message}")
+            print(f"  WS [{session_id[:8]}] -> {message}")
 
             # send typing indicator
             await websocket.send_text(json.dumps({
