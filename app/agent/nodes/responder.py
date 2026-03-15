@@ -1,6 +1,6 @@
 from app.agent.state import AgentState
 from app.llm import get_llm
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import SystemMessage, AIMessage
 
 llm = get_llm()
 
@@ -10,10 +10,9 @@ Maximum 2-3 sentences per response.
 Never use bullet points or markdown.
 Never answer questions unrelated to the business under any circumstances."""
 
-# hardcoded responses -- no LLM needed
 STATIC_RESPONSES = {
     "OUT_OF_SCOPE": "I can only help with questions about our business, such as services, hours, pricing, or bookings. Is there anything like that I can help you with?",
-    "ESCALATE": "Of course, let me connect you with a team member right away. Please hold for a moment.",
+    "ESCALATE": "Of course, let me connect you with a team member right away. Please hold for a moment."
 }
 
 def generate_response(state: AgentState) -> AgentState:
@@ -25,6 +24,19 @@ def generate_response(state: AgentState) -> AgentState:
         reply = STATIC_RESPONSES[intent]
         print(f"  [ResponseGenerator] -> (static) {reply[:60]}...")
         return {"messages": [AIMessage(content=reply)]}
+    
+    if intent in {"CONVERSATION", "GREETING"}:
+        system_content = """You are a friendly voice assistant for City Dental Clinic.
+        Respond naturally to the user. If they share their name, acknowledge it warmly.
+        If they are asking about something said earlier, answer from the conversation history.
+        Keep it brief — maximum 2 sentences."""
+        response = llm.invoke([
+            SystemMessage(content=system_content),
+            *state["messages"]
+        ])
+        print(f"  [ResponseGenerator] -> {response.content[:60]}...")
+        return {"messages": [AIMessage(content=response.content)]}
+
 
     system_content = SYSTEM_PROMPT
     if context:

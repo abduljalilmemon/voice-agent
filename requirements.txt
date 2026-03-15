@@ -4,6 +4,7 @@ langchain-anthropic
 langchain-openai
 langchain-google-genai
 langchain-groq
+langgraph-checkpoint-sqlite
 chromadb
 fastapi
 uvicorn

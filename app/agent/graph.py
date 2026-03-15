@@ -1,4 +1,6 @@
 from langgraph.graph import StateGraph, END
+from langgraph.checkpoint.sqlite import SqliteSaver
+import sqlite3
 from app.agent.state import AgentState
 from app.agent.nodes.intent import classify_intent
 from app.agent.nodes.retriever import knowledge_retriever
@@ -17,6 +19,8 @@ def build_graph():
     graph.add_edge("knowledge_retriever", "response_generator")
     graph.add_edge("response_generator", END)
 
-    return graph.compile()
+    conn = sqlite3.connect("memory.db", check_same_thread=False)
+    memory = SqliteSaver(conn)
+    return graph.compile(checkpointer=memory)
 
 agent = build_graph()
