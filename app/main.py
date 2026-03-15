@@ -1,11 +1,16 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 import uuid
 import json
+import base64
+import asyncio
 
 from app.agent.graph import agent
+from app.voice.tts import text_to_speech_bytes
+from app.voice.stt import transcribe_audio_bytes
 from langchain_core.messages import HumanMessage
 
 @asynccontextmanager
@@ -43,7 +48,6 @@ def health():
 
 @app.post("/chat")
 def chat(payload: dict):
-    """Single turn REST endpoint"""
     message = payload.get("message", "")
     session_id = payload.get("session_id", str(uuid.uuid4()))
 
@@ -51,7 +55,6 @@ def chat(payload: dict):
         return {"error": "message is required"}
 
     config = {"configurable": {"thread_id": session_id}}
-
     result = agent.invoke(
         {
             "messages": [HumanMessage(content=message)],
@@ -63,16 +66,14 @@ def chat(payload: dict):
     )
 
     reply = result["messages"][-1].content
-    intent = result.get("intent", "")
-
     return {
         "session_id": session_id,
         "message": message,
         "reply": reply,
-        "intent": intent
+        "intent": result.get("intent", "")
     }
 
-# ── WebSocket Endpoint ─────────────────────────────────────────
+# ── Text WebSocket ─────────────────────────────────────────────
 
 @app.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
@@ -82,7 +83,6 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
     try:
         while True:
-            # receive message from client
             data = await websocket.receive_text()
             payload = json.loads(data)
             message = payload.get("message", "")
@@ -92,13 +92,11 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
             print(f"  WS [{session_id[:8]}] -> {message}")
 
-            # send typing indicator
             await websocket.send_text(json.dumps({
                 "type": "typing",
                 "session_id": session_id
             }))
 
-            # run agent
             result = agent.invoke(
                 {
                     "messages": [HumanMessage(content=message)],
@@ -112,7 +110,6 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             reply = result["messages"][-1].content
             intent = result.get("intent", "")
 
-            # send response back
             await websocket.send_text(json.dumps({
                 "type": "message",
                 "session_id": session_id,
@@ -123,3 +120,77 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
     except WebSocketDisconnect:
         print(f"WebSocket disconnected: {session_id[:8]}...")
+
+# ── Voice WebSocket ────────────────────────────────────────────
+
+@app.websocket("/ws/voice/{session_id}")
+async def voice_websocket_endpoint(websocket: WebSocket, session_id: str):
+    await websocket.accept()
+    config = {"configurable": {"thread_id": session_id}}
+    print(f"Voice WebSocket connected: {session_id[:8]}...")
+
+    try:
+        while True:
+            # receive audio bytes from browser
+            data = await websocket.receive_bytes()
+            print(f"  [Voice WS] received {len(data)} bytes of audio")
+
+            # step 1 — transcribe audio to text
+            await websocket.send_text(json.dumps({"type": "status", "message": "Transcribing..."}))
+            transcript = transcribe_audio_bytes(data, mimetype="audio/webm")
+
+            if not transcript.strip():
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "message": "Could not transcribe audio. Please try again."
+                }))
+                continue
+
+            print(f"  [Voice WS] transcript: '{transcript}'")
+
+            # send transcript back so UI can show it
+            await websocket.send_text(json.dumps({
+                "type": "transcript",
+                "text": transcript
+            }))
+
+            # step 2 — run agent
+            await websocket.send_text(json.dumps({"type": "status", "message": "Thinking..."}))
+
+            result = agent.invoke(
+                {
+                    "messages": [HumanMessage(content=transcript)],
+                    "intent": "",
+                    "context": "",
+                    "session_id": session_id
+                },
+                config=config
+            )
+
+            reply = result["messages"][-1].content
+            intent = result.get("intent", "")
+            print(f"  [Voice WS] reply: '{reply[:60]}...'")
+
+            # send text reply
+            await websocket.send_text(json.dumps({
+                "type": "reply",
+                "text": reply,
+                "intent": intent
+            }))
+
+            # step 3 — convert reply to speech
+            await websocket.send_text(json.dumps({"type": "status", "message": "Generating voice..."}))
+            audio_bytes = text_to_speech_bytes(reply)
+
+            # send audio as base64 so browser can play it
+            audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+            await websocket.send_text(json.dumps({
+                "type": "audio",
+                "data": audio_b64,
+                "format": "mp3"
+            }))
+
+            print(f"  [Voice WS] sent {len(audio_bytes)} bytes of audio")
+
+    except WebSocketDisconnect:
+        print(f"Voice WebSocket disconnected: {session_id[:8]}...")
