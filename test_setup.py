@@ -29,7 +29,7 @@ def chat(message: str, config: dict):
     print(f"  [Memory] -> {len(result['messages'])} messages in history")
     for msg in result["messages"]:
         role = "User" if isinstance(msg, HumanMessage) else "Agent"
-        print(f"    {role}: {msg.content[:50]}")
+        print(f"    {role}: {msg.content}")
 
     reply = result["messages"][-1].content
     print(f"Agent: {reply}")

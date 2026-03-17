@@ -1,21 +1,24 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 import uuid
 import json
 import base64
-import asyncio
 
 from app.agent.graph import agent
 from app.voice.tts import text_to_speech_bytes
 from app.voice.stt import transcribe_audio_bytes
+from app.integrations.booking_store import save_booking, get_all_bookings
 from langchain_core.messages import HumanMessage
+
+# load business config once at startup
+with open("data/business_config.json") as f:
+    BIZ_CONFIG = json.load(f)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("Voice Agent API starting...")
+    print(f"Voice Agent API starting — {BIZ_CONFIG['business_name']}...")
     yield
     print("Voice Agent API shutting down...")
 
@@ -36,6 +39,21 @@ app.add_middleware(
 
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
+# ── Helper ─────────────────────────────────────────────────────
+
+def handle_booking(result: dict, session_id: str) -> dict | None:
+    """Check if booking is complete and save it. Returns booking_id or None."""
+    booking_data = result.get("booking_data", {})
+    if booking_data.get("complete"):
+        booking_id = save_booking(
+            session_id,
+            BIZ_CONFIG["business_name"],
+            booking_data
+        )
+        print(f"  [Main] -> booking #{booking_id} saved for {booking_data.get('name')}")
+        return booking_id
+    return None
+
 # ── REST Endpoints ─────────────────────────────────────────────
 
 @app.get("/")
@@ -45,6 +63,26 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "healthy"}
+
+@app.get("/bookings")
+def list_bookings():
+    rows = get_all_bookings()
+    bookings = []
+    for row in rows:
+        bookings.append({
+            "id": row[0],
+            "session_id": row[1],
+            "business": row[2],
+            "name": row[3],
+            "phone": row[4],
+            "email": row[5],
+            "date": row[6],
+            "time": row[7],
+            "service": row[8],
+            "status": row[10],
+            "created_at": row[11]
+        })
+    return {"total": len(bookings), "bookings": bookings}
 
 @app.post("/chat")
 def chat(payload: dict):
@@ -60,17 +98,21 @@ def chat(payload: dict):
             "messages": [HumanMessage(content=message)],
             "intent": "",
             "context": "",
-            "session_id": session_id
+            "session_id": session_id,
+            "booking_data": {}
         },
         config=config
     )
 
     reply = result["messages"][-1].content
+    booking_id = handle_booking(result, session_id)
+
     return {
         "session_id": session_id,
         "message": message,
         "reply": reply,
-        "intent": result.get("intent", "")
+        "intent": result.get("intent", ""),
+        "booking_saved": booking_id is not None
     }
 
 # ── Text WebSocket ─────────────────────────────────────────────
@@ -102,7 +144,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                     "messages": [HumanMessage(content=message)],
                     "intent": "",
                     "context": "",
-                    "session_id": session_id
+                    "session_id": session_id,
+                    "booking_data": {}
                 },
                 config=config
             )
@@ -110,12 +153,17 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             reply = result["messages"][-1].content
             intent = result.get("intent", "")
 
+            # save booking if complete
+            booking_id = handle_booking(result, session_id)
+
             await websocket.send_text(json.dumps({
                 "type": "message",
                 "session_id": session_id,
                 "message": message,
                 "reply": reply,
-                "intent": intent
+                "intent": intent,
+                "booking_confirmed": booking_id is not None,
+                "booking_id": booking_id
             }))
 
     except WebSocketDisconnect:
@@ -131,11 +179,10 @@ async def voice_websocket_endpoint(websocket: WebSocket, session_id: str):
 
     try:
         while True:
-            # receive audio bytes from browser
             data = await websocket.receive_bytes()
             print(f"  [Voice WS] received {len(data)} bytes of audio")
 
-            # step 1 — transcribe audio to text
+            # step 1 — transcribe
             await websocket.send_text(json.dumps({"type": "status", "message": "Transcribing..."}))
             transcript = transcribe_audio_bytes(data, mimetype="audio/webm")
 
@@ -148,7 +195,6 @@ async def voice_websocket_endpoint(websocket: WebSocket, session_id: str):
 
             print(f"  [Voice WS] transcript: '{transcript}'")
 
-            # send transcript back so UI can show it
             await websocket.send_text(json.dumps({
                 "type": "transcript",
                 "text": transcript
@@ -162,27 +208,30 @@ async def voice_websocket_endpoint(websocket: WebSocket, session_id: str):
                     "messages": [HumanMessage(content=transcript)],
                     "intent": "",
                     "context": "",
-                    "session_id": session_id
+                    "session_id": session_id,
+                    "booking_data": {}
                 },
                 config=config
             )
 
             reply = result["messages"][-1].content
             intent = result.get("intent", "")
-            print(f"  [Voice WS] reply: '{reply[:60]}...'")
 
-            # send text reply
+            # save booking if complete
+            booking_id = handle_booking(result, session_id)
+
             await websocket.send_text(json.dumps({
                 "type": "reply",
                 "text": reply,
-                "intent": intent
+                "intent": intent,
+                "booking_confirmed": booking_id is not None,
+                "booking_id": booking_id
             }))
 
-            # step 3 — convert reply to speech
+            # step 3 — text to speech
             await websocket.send_text(json.dumps({"type": "status", "message": "Generating voice..."}))
             audio_bytes = text_to_speech_bytes(reply)
 
-            # send audio as base64 so browser can play it
             audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
             await websocket.send_text(json.dumps({
                 "type": "audio",

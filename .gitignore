@@ -27,6 +27,7 @@ chroma_db/
 .chroma_db/
 *.bin
 memory.db*
+bookings.db
 
 *.mp3
 *.wav
