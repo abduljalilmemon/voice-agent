@@ -1,0 +1,16 @@
+
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+.git/
+.gitignore
+*.db
+*.db-wal
+*.db-shm
+chroma_db/
+*.mp3
+*.wav
+test_*.py
+run_once_*.py

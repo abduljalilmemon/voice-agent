@@ -1,0 +1,16 @@
+version: "3.9"
+
+services:
+  voice-agent:
+    build: .
+    container_name: voice-agent
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data                  # business config + knowledge base
+      - ./chroma_db:/app/chroma_db        # vector store persistence
+      - ./memory.db:/app/memory.db        # conversation memory
+      - ./bookings.db:/app/bookings.db    # bookings database
+    restart: unless-stopped
