@@ -20,7 +20,7 @@ Return ONLY a valid JSON object with these fields (use null if not mentioned):
 }
 
 Set "complete" to true when name, date, AND time are all present.
-Phone and email are optional — do NOT require them for complete=true.
+Phone and email are optional -- do NOT require them for complete=true.
 Return ONLY the JSON. No explanation. No markdown. No backticks."""
 
 def extract_booking(state: AgentState) -> AgentState:
@@ -52,7 +52,7 @@ def extract_booking(state: AgentState) -> AgentState:
             for k, v in booking_data.items()
         }
 
-        # calculate complete ourselves — never trust the LLM for this
+        # calculate complete ourselves -- never trust the LLM for this
         required = ["name", "date", "time"]
         booking_data["complete"] = all(
             booking_data.get(field) not in (None, "null", "")

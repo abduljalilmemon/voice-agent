@@ -54,8 +54,6 @@ def save_booking(session_id: str, business_name: str, booking_data: dict) -> int
 def get_all_bookings() -> list:
     init_bookings_db()
     conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute(
-        "SELECT * FROM bookings ORDER BY created_at DESC"
-    ).fetchall()
+    rows = conn.execute("SELECT * FROM bookings ORDER BY created_at DESC").fetchall()
     conn.close()
     return rows

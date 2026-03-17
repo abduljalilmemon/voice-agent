@@ -25,7 +25,7 @@ def chat(message: str, config: dict):
     )
     print(agent.get_state(config))
 
-    # debug — show full message history
+    # debug -- show full message history
     print(f"  [Memory] -> {len(result['messages'])} messages in history")
     for msg in result["messages"]:
         role = "User" if isinstance(msg, HumanMessage) else "Agent"

@@ -54,7 +54,7 @@ def generate_response(state: AgentState) -> AgentState:
     3. Then ask for phone number (if not already provided)
     Only ask for ONE piece of missing information per response.
     Never ask for everything at once.
-    Check the conversation history before asking — don't ask for info already given."""
+    Check the conversation history before asking -- don't ask for info already given."""
     response = llm.invoke([
         SystemMessage(content=system_content),
         *state["messages"]

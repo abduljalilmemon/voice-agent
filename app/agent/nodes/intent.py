@@ -82,7 +82,6 @@ def classify_intent(state: AgentState) -> AgentState:
     intent = response.content.strip().upper()
 
     # safety fallback
-    # valid = {"FAQ", "BOOK", "COMPLAINT", "ESCALATE", "OUT_OF_SCOPE", "GREETING", "CONVERSATION"}
     valid = {"FAQ", "BOOK", "COMPLAINT", "ESCALATE", "OUT_OF_SCOPE", "GREETING", "CONVERSATION", "COLLECT"}
     if intent not in valid:
         intent = "FAQ"

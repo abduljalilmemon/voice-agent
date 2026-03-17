@@ -7,7 +7,7 @@ load_dotenv()
 
 client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
 
-# Sarah — Mature, Reassuring, Confident
+# Sarah -- Mature, Reassuring, Confident
 VOICE_ID = "EXAVITQu4vr4xnSDxMaL"
 
 def text_to_speech(text: str, output_path: str = "output.mp3") -> str:

@@ -12,13 +12,16 @@ from app.voice.stt import transcribe_audio_bytes
 from app.integrations.booking_store import save_booking, get_all_bookings
 from langchain_core.messages import HumanMessage
 
+from app.integrations.booking_store import save_booking, get_all_bookings
+from app.integrations.notifications import send_booking_email
+
 # load business config once at startup
 with open("data/business_config.json") as f:
     BIZ_CONFIG = json.load(f)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print(f"Voice Agent API starting — {BIZ_CONFIG['business_name']}...")
+    print(f"Voice Agent API starting -- {BIZ_CONFIG['business_name']}...")
     yield
     print("Voice Agent API shutting down...")
 
@@ -41,8 +44,8 @@ app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
 # ── Helper ─────────────────────────────────────────────────────
 
-def handle_booking(result: dict, session_id: str) -> dict | None:
-    """Check if booking is complete and save it. Returns booking_id or None."""
+def handle_booking(result: dict, session_id: str) -> int | None:
+    """Check if booking is complete, save it and send email."""
     booking_data = result.get("booking_data", {})
     if booking_data.get("complete"):
         booking_id = save_booking(
@@ -51,6 +54,14 @@ def handle_booking(result: dict, session_id: str) -> dict | None:
             booking_data
         )
         print(f"  [Main] -> booking #{booking_id} saved for {booking_data.get('name')}")
+
+        # send email notification
+        send_booking_email(
+            booking_data,
+            BIZ_CONFIG["business_name"],
+            BIZ_CONFIG["owner_email"]
+        )
+
         return booking_id
     return None
 
@@ -182,7 +193,7 @@ async def voice_websocket_endpoint(websocket: WebSocket, session_id: str):
             data = await websocket.receive_bytes()
             print(f"  [Voice WS] received {len(data)} bytes of audio")
 
-            # step 1 — transcribe
+            # step 1 -- transcribe
             await websocket.send_text(json.dumps({"type": "status", "message": "Transcribing..."}))
             transcript = transcribe_audio_bytes(data, mimetype="audio/webm")
 
@@ -200,7 +211,7 @@ async def voice_websocket_endpoint(websocket: WebSocket, session_id: str):
                 "text": transcript
             }))
 
-            # step 2 — run agent
+            # step 2 -- run agent
             await websocket.send_text(json.dumps({"type": "status", "message": "Thinking..."}))
 
             result = agent.invoke(
@@ -228,7 +239,7 @@ async def voice_websocket_endpoint(websocket: WebSocket, session_id: str):
                 "booking_id": booking_id
             }))
 
-            # step 3 — text to speech
+            # step 3 -- text to speech
             await websocket.send_text(json.dumps({"type": "status", "message": "Generating voice..."}))
             audio_bytes = text_to_speech_bytes(reply)
 

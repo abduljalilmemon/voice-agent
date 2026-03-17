@@ -11,7 +11,7 @@ def test_tts():
         output_path="test_output.mp3"
     )
     size = os.path.getsize(path)
-    print(f"  [TTS] OK — file size: {size} bytes")
+    print(f"  [TTS] OK -- file size: {size} bytes")
     print(f"  Open test_output.mp3 to hear the voice")
 
 if __name__ == "__main__":
