@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   voice-agent:
     build: .
@@ -8,9 +6,11 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    environment:
+      - USE_ONNX_EMBEDDINGS=true
     volumes:
-      - ./data:/app/data                  # business config + knowledge base
-      - ./chroma_db:/app/chroma_db        # vector store persistence
-      - ./memory.db:/app/memory.db        # conversation memory
-      - ./bookings.db:/app/bookings.db    # bookings database
+      - ./data:/app/data
+      - ./chroma_db:/app/chroma_db
+      - ./memory.db:/app/memory.db
+      - ./bookings.db:/app/bookings.db
     restart: unless-stopped
