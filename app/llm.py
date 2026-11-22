@@ -22,7 +22,7 @@ def get_llm(temperature: float = 0.7):
     elif provider == "groq":
         from langchain_groq import ChatGroq
         return ChatGroq(
-            model="llama-3.1-8b-instant",
+            model=os.getenv("GROQ_MODEL", "openai/gpt-oss-20b"),
             temperature=temperature,
             groq_api_key=os.getenv("GROQ_API_KEY")
         )
