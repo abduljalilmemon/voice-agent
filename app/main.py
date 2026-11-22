@@ -9,15 +9,9 @@ import base64
 from app.agent.graph import agent
 from app.voice.tts import text_to_speech_bytes
 from app.voice.stt import transcribe_audio_bytes
-from app.integrations.booking_store import save_booking, get_all_bookings
+from app.integrations.booking_store import get_all_bookings
+from app.config import BIZ_CONFIG
 from langchain_core.messages import HumanMessage
-
-from app.integrations.booking_store import save_booking, get_all_bookings
-from app.integrations.notifications import send_booking_email
-
-# load business config once at startup
-with open("data/business_config.json") as f:
-    BIZ_CONFIG = json.load(f)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -44,26 +38,22 @@ app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
 # ── Helper ─────────────────────────────────────────────────────
 
-def handle_booking(result: dict, session_id: str) -> int | None:
-    """Check if booking is complete, save it and send email."""
-    booking_data = result.get("booking_data", {})
-    if booking_data.get("complete"):
-        booking_id = save_booking(
-            session_id,
-            BIZ_CONFIG["business_name"],
-            booking_data
-        )
-        print(f"  [Main] -> booking #{booking_id} saved for {booking_data.get('name')}")
+def run_turn(session_id: str, text: str) -> dict:
+    """Run one conversation turn through the agent.
 
-        # send email notification
-        send_booking_email(
-            booking_data,
-            BIZ_CONFIG["business_name"],
-            BIZ_CONFIG["owner_email"]
-        )
-
-        return booking_id
-    return None
+    Only per-turn fields are passed in. Persistent fields (booking_data, booking_id)
+    are left out so the checkpointer keeps them between turns.
+    """
+    return agent.invoke(
+        {
+            "messages": [HumanMessage(content=text)],
+            "intent": "",
+            "context": "",
+            "session_id": session_id,
+            "new_booking_id": None
+        },
+        config={"configurable": {"thread_id": session_id}}
+    )
 
 # ── REST Endpoints ─────────────────────────────────────────────
 
@@ -103,20 +93,10 @@ def chat(payload: dict):
     if not message:
         return {"error": "message is required"}
 
-    config = {"configurable": {"thread_id": session_id}}
-    result = agent.invoke(
-        {
-            "messages": [HumanMessage(content=message)],
-            "intent": "",
-            "context": "",
-            "session_id": session_id,
-            "booking_data": {}
-        },
-        config=config
-    )
+    result = run_turn(session_id, message)
 
     reply = result["messages"][-1].content
-    booking_id = handle_booking(result, session_id)
+    booking_id = result.get("new_booking_id")
 
     return {
         "session_id": session_id,
@@ -131,7 +111,6 @@ def chat(payload: dict):
 @app.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
     await websocket.accept()
-    config = {"configurable": {"thread_id": session_id}}
     print(f"WebSocket connected: {session_id[:8]}...")
 
     try:
@@ -150,22 +129,13 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 "session_id": session_id
             }))
 
-            result = agent.invoke(
-                {
-                    "messages": [HumanMessage(content=message)],
-                    "intent": "",
-                    "context": "",
-                    "session_id": session_id,
-                    "booking_data": {}
-                },
-                config=config
-            )
+            result = run_turn(session_id, message)
 
             reply = result["messages"][-1].content
             intent = result.get("intent", "")
 
-            # save booking if complete
-            booking_id = handle_booking(result, session_id)
+            # set only on the turn the booking was saved
+            booking_id = result.get("new_booking_id")
 
             await websocket.send_text(json.dumps({
                 "type": "message",
@@ -185,7 +155,6 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 @app.websocket("/ws/voice/{session_id}")
 async def voice_websocket_endpoint(websocket: WebSocket, session_id: str):
     await websocket.accept()
-    config = {"configurable": {"thread_id": session_id}}
     print(f"Voice WebSocket connected: {session_id[:8]}...")
 
     try:
@@ -214,22 +183,13 @@ async def voice_websocket_endpoint(websocket: WebSocket, session_id: str):
             # step 2 -- run agent
             await websocket.send_text(json.dumps({"type": "status", "message": "Thinking..."}))
 
-            result = agent.invoke(
-                {
-                    "messages": [HumanMessage(content=transcript)],
-                    "intent": "",
-                    "context": "",
-                    "session_id": session_id,
-                    "booking_data": {}
-                },
-                config=config
-            )
+            result = run_turn(session_id, transcript)
 
             reply = result["messages"][-1].content
             intent = result.get("intent", "")
 
-            # save booking if complete
-            booking_id = handle_booking(result, session_id)
+            # set only on the turn the booking was saved
+            booking_id = result.get("new_booking_id")
 
             await websocket.send_text(json.dumps({
                 "type": "reply",

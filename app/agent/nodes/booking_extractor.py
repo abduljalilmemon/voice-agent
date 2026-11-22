@@ -1,5 +1,4 @@
 import json
-from app.agent.nodes import intent
 from app.agent.state import AgentState
 from app.llm import get_llm
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -19,16 +18,16 @@ Return ONLY a valid JSON object with these fields (use null if not mentioned):
     "complete": true or false
 }
 
-Set "complete" to true when name, date, AND time are all present.
-Phone and email are optional -- do NOT require them for complete=true.
+Set "complete" to true when name, date, time, AND phone are all present.
+Email is optional -- do NOT require it for complete=true.
 Return ONLY the JSON. No explanation. No markdown. No backticks."""
 
 def extract_booking(state: AgentState) -> AgentState:
     intent = state.get("intent", "")
 
-    # only run on booking-related intents
+    # only run on booking-related intents -- return {} so previously collected data is kept
     if intent not in {"BOOK", "COLLECT"}:
-        return {"booking_data": {}}
+        return {}
 
     # build full conversation text
     conversation = "\n".join([
@@ -53,7 +52,7 @@ def extract_booking(state: AgentState) -> AgentState:
         }
 
         # calculate complete ourselves -- never trust the LLM for this
-        required = ["name", "date", "time"]
+        required = ["name", "date", "time", "phone"]
         booking_data["complete"] = all(
             booking_data.get(field) not in (None, "null", "")
             for field in required
@@ -64,4 +63,4 @@ def extract_booking(state: AgentState) -> AgentState:
 
     except Exception as e:
         print(f"  [BookingExtractor] -> parse error: {e} | raw: {response.content}")
-        return {"booking_data": {}}
+        return {}  # keep previously collected data
