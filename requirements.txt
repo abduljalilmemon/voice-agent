@@ -16,5 +16,4 @@ websockets
 openai
 deepgram-sdk
 elevenlabs
-edge-tts
-nest_asyncio
+edge-tts>=7.3.1

@@ -13,22 +13,22 @@ VOICES = {
     "openai": "nova"
 }
 
-def text_to_speech_bytes(text: str) -> bytes:
-    """Convert text to speech and return raw bytes."""
+async def text_to_speech_bytes(text: str) -> bytes:
+    """Convert text to speech and return raw bytes. Never blocks the event loop."""
     provider = TTS_PROVIDER.lower()
 
     if provider == "edge":
-        return _edge_tts(text)
+        return await _edge_tts(text)
     elif provider == "elevenlabs":
-        return _elevenlabs_tts(text)
+        return await asyncio.to_thread(_elevenlabs_tts, text)
     elif provider == "openai":
-        return _openai_tts(text)
+        return await asyncio.to_thread(_openai_tts, text)
     else:
         raise ValueError(f"Unknown TTS provider: {provider}")
 
 def text_to_speech(text: str, output_path: str = "output.mp3") -> str:
-    """Convert text to speech and save to file."""
-    audio_bytes = text_to_speech_bytes(text)
+    """Convert text to speech and save to file (sync helper for scripts)."""
+    audio_bytes = asyncio.run(text_to_speech_bytes(text))
     with open(output_path, "wb") as f:
         f.write(audio_bytes)
     print(f"  [TTS] -> saved to {output_path}")
@@ -36,22 +36,15 @@ def text_to_speech(text: str, output_path: str = "output.mp3") -> str:
 
 # ── Edge TTS (free) ────────────────────────────────────────────
 
-# ── Edge TTS (free) ────────────────────────────────────────────
-
-def _edge_tts(text: str) -> bytes:
-    import nest_asyncio
-    nest_asyncio.apply()
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(_edge_generate(text))
-
-async def _edge_generate(text: str) -> bytes:
+async def _edge_tts(text: str) -> bytes:
     import edge_tts
     voice = os.getenv("EDGE_VOICE", VOICES["edge"])
     communicate = edge_tts.Communicate(text, voice)
-    audio_bytes = b""
+    chunks = []
     async for chunk in communicate.stream():
         if chunk["type"] == "audio":
-            audio_bytes += chunk["data"]
+            chunks.append(chunk["data"])
+    audio_bytes = b"".join(chunks)
     print(f"  [TTS] -> Edge | {len(audio_bytes)} bytes")
     return audio_bytes
 

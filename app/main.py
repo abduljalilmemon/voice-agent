@@ -2,6 +2,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
+import asyncio
 import uuid
 import json
 import base64
@@ -39,7 +40,7 @@ app.mount("/static", StaticFiles(directory="frontend"), name="static")
 # ── Helper ─────────────────────────────────────────────────────
 
 def run_turn(session_id: str, text: str) -> dict:
-    """Run one conversation turn through the agent.
+    """Run one conversation turn through the agent (blocking -- call via asyncio.to_thread).
 
     Only per-turn fields are passed in. Persistent fields (booking_data, booking_id)
     are left out so the checkpointer keeps them between turns.
@@ -129,7 +130,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 "session_id": session_id
             }))
 
-            result = run_turn(session_id, message)
+            result = await asyncio.to_thread(run_turn, session_id, message)
 
             reply = result["messages"][-1].content
             intent = result.get("intent", "")
@@ -164,7 +165,7 @@ async def voice_websocket_endpoint(websocket: WebSocket, session_id: str):
 
             # step 1 -- transcribe
             await websocket.send_text(json.dumps({"type": "status", "message": "Transcribing..."}))
-            transcript = transcribe_audio_bytes(data, mimetype="audio/webm")
+            transcript = await asyncio.to_thread(transcribe_audio_bytes, data, "audio/webm")
 
             if not transcript.strip():
                 await websocket.send_text(json.dumps({
@@ -183,7 +184,7 @@ async def voice_websocket_endpoint(websocket: WebSocket, session_id: str):
             # step 2 -- run agent
             await websocket.send_text(json.dumps({"type": "status", "message": "Thinking..."}))
 
-            result = run_turn(session_id, transcript)
+            result = await asyncio.to_thread(run_turn, session_id, transcript)
 
             reply = result["messages"][-1].content
             intent = result.get("intent", "")
@@ -201,7 +202,7 @@ async def voice_websocket_endpoint(websocket: WebSocket, session_id: str):
 
             # step 3 -- text to speech
             await websocket.send_text(json.dumps({"type": "status", "message": "Generating voice..."}))
-            audio_bytes = text_to_speech_bytes(reply)
+            audio_bytes = await text_to_speech_bytes(reply)
 
             audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
             await websocket.send_text(json.dumps({
