@@ -1,24 +1,16 @@
-import os
 import chromadb
+from chromadb.utils.embedding_functions import ONNXMiniLM_L6_V2
 
 CHROMA_PATH = "chroma_db"
 COLLECTION_NAME = "business_knowledge"
 
 def get_collection():
+    # all-MiniLM-L6-v2 via ONNX Runtime -- same model as sentence-transformers, without PyTorch.
+    # The embedding function is persisted with the collection, so ingest and query must match.
     client = chromadb.PersistentClient(path=CHROMA_PATH)
-
-    if os.getenv("USE_ONNX_EMBEDDINGS", "false").lower() == "true":
-        from chromadb.utils.embedding_functions import ONNXMiniLM_L6_V2
-        embedding_fn = ONNXMiniLM_L6_V2()
-    else:
-        from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
-        embedding_fn = SentenceTransformerEmbeddingFunction(
-            model_name="all-MiniLM-L6-v2"
-        )
-
     return client.get_or_create_collection(
         name=COLLECTION_NAME,
-        embedding_function=embedding_fn
+        embedding_function=ONNXMiniLM_L6_V2()
     )
 
 def ingest_file(filepath: str):
