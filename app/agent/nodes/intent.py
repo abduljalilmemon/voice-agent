@@ -83,7 +83,7 @@ def classify_intent(state: AgentState) -> AgentState:
     ])
 
     # safety fallback
-    intent = _parse_intent(response.content) or "FAQ"
+    intent = _parse_intent(response.text) or "FAQ"
 
     print(f"  [IntentClassifier] -> {intent}")
     return {"intent": intent}

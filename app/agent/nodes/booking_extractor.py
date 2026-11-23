@@ -41,7 +41,7 @@ def extract_booking(state: AgentState) -> AgentState:
     ])
 
     try:
-        raw = response.content.strip()
+        raw = response.text.strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         booking_data = json.loads(raw)
 
@@ -62,5 +62,5 @@ def extract_booking(state: AgentState) -> AgentState:
         return {"booking_data": booking_data}
 
     except Exception as e:
-        print(f"  [BookingExtractor] -> parse error: {e} | raw: {response.content}")
+        print(f"  [BookingExtractor] -> parse error: {e} | raw: {response.text}")
         return {}  # keep previously collected data

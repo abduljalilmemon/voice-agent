@@ -37,8 +37,8 @@ def generate_response(state: AgentState) -> AgentState:
             SystemMessage(content=system_content),
             *state["messages"]
         ])
-        print(f"  [ResponseGenerator] -> {response.content[:60]}...")
-        return {"messages": [AIMessage(content=response.content)]}
+        print(f"  [ResponseGenerator] -> {response.text[:60]}...")
+        return {"messages": [AIMessage(content=response.text)]}
 
 
     system_content = SYSTEM_PROMPT
@@ -60,5 +60,5 @@ def generate_response(state: AgentState) -> AgentState:
         *state["messages"]
     ])
 
-    print(f"  [ResponseGenerator] -> {response.content}...")
-    return {"messages": [AIMessage(content=response.content)]}
+    print(f"  [ResponseGenerator] -> {response.text}...")
+    return {"messages": [AIMessage(content=response.text)]}
