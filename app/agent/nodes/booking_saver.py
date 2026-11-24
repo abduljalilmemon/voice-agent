@@ -1,5 +1,5 @@
 from app.agent.state import AgentState
-from app.config import BIZ_CONFIG
+from app.config import BIZ_CONFIG, OWNER_EMAIL
 from app.integrations.booking_store import save_booking
 from app.integrations.notifications import send_booking_email
 
@@ -20,6 +20,6 @@ def save_completed_booking(state: AgentState) -> AgentState:
     send_booking_email(
         booking_data,
         BIZ_CONFIG["business_name"],
-        BIZ_CONFIG["owner_email"]
+        OWNER_EMAIL
     )
     return {"booking_id": booking_id, "new_booking_id": booking_id}

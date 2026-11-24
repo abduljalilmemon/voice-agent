@@ -83,13 +83,15 @@
 
 <script>
     const sessionId = crypto.randomUUID();
+    // connect back to whichever host served this page (works for localhost, 127.0.0.1, a domain, https)
+    const WS_BASE = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
     let mediaRecorder = null;
     let audioChunks = [];
     let isRecording = false;
     let voiceWs = null;
 
     // ── Text WebSocket ──────────────────────────────────────────
-    const textWs = new WebSocket(`ws://localhost:8000/ws/${sessionId}`);
+    const textWs = new WebSocket(`${WS_BASE}/ws/${sessionId}`);
     const messagesEl = document.getElementById("messages");
     const inputEl = document.getElementById("input");
     const sendBtn = document.getElementById("send-btn");
@@ -110,8 +112,8 @@
         const data = JSON.parse(event.data);
         removeTyping();
         if (data.type === "typing") addTyping();
-        else if (data.type === "message") {
-            addMessage("agent", data.reply, data.intent);
+        else if (data.type === "message" || data.type === "error") {
+            addMessage("agent", data.type === "error" ? data.message : data.reply, data.intent);
             sendBtn.disabled = false;
             inputEl.disabled = false;
         }
@@ -157,7 +159,7 @@
 
     // ── Voice WebSocket ─────────────────────────────────────────
     function connectVoiceWs() {
-        voiceWs = new WebSocket(`ws://localhost:8000/ws/voice/${sessionId}`);
+        voiceWs = new WebSocket(`${WS_BASE}/ws/voice/${sessionId}`);
         const statusVoiceEl = document.getElementById("status-voice");
         const micBtn = document.getElementById("mic-btn");
 

@@ -1,3 +1,4 @@
+import os
 from app.integrations.notifications import send_booking_email
 
 test_booking = {
@@ -12,7 +13,7 @@ test_booking = {
 result = send_booking_email(
     test_booking,
     "City Dental Clinic",
-    "jay207803@gmail.com"
+    os.getenv("OWNER_EMAIL")
 )
 
 print(f"Email sent: {result}")

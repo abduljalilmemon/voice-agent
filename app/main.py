@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
@@ -6,12 +6,17 @@ import asyncio
 import uuid
 import json
 import base64
+from pydantic import BaseModel, Field
 
 from app.agent.graph import agent
 from app.voice.tts import text_to_speech_bytes
 from app.voice.stt import transcribe_audio_bytes
 from app.integrations.booking_store import get_all_bookings
 from app.config import BIZ_CONFIG
+from app.security import (
+    ALLOWED_ORIGINS, MAX_AUDIO_BYTES, MAX_MESSAGE_CHARS, MAX_SESSION_ID_CHARS,
+    client_key, require_admin, turn_limiter, websocket_origin_allowed,
+)
 from langchain_core.messages import HumanMessage
 
 @asynccontextmanager
@@ -29,10 +34,10 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,  # empty by default: the bundled frontend is same-origin
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "X-API-Key"],
 )
 
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
@@ -56,6 +61,19 @@ def run_turn(session_id: str, text: str) -> dict:
         config={"configurable": {"thread_id": session_id}}
     )
 
+RATE_LIMITED = "You're sending messages too quickly. Please wait a moment and try again."
+
+async def accept_if_allowed(websocket: WebSocket, session_id: str) -> bool:
+    """Reject cross-site browser connections and malformed session ids before accepting."""
+    if not websocket_origin_allowed(websocket) or len(session_id) > MAX_SESSION_ID_CHARS:
+        await websocket.close(code=1008)  # policy violation
+        return False
+    await websocket.accept()
+    return True
+
+async def send_error(websocket: WebSocket, message: str):
+    await websocket.send_text(json.dumps({"type": "error", "message": message}))
+
 # ── REST Endpoints ─────────────────────────────────────────────
 
 @app.get("/")
@@ -66,7 +84,7 @@ def root():
 def health():
     return {"status": "healthy"}
 
-@app.get("/bookings")
+@app.get("/bookings", dependencies=[Depends(require_admin)])
 def list_bookings():
     rows = get_all_bookings()
     bookings = []
@@ -86,14 +104,16 @@ def list_bookings():
         })
     return {"total": len(bookings), "bookings": bookings}
 
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=MAX_MESSAGE_CHARS)
+    session_id: str = Field(default_factory=lambda: str(uuid.uuid4()), max_length=MAX_SESSION_ID_CHARS)
+
 @app.post("/chat")
-def chat(payload: dict):
-    message = payload.get("message", "")
-    session_id = payload.get("session_id", str(uuid.uuid4()))
+def chat(payload: ChatRequest, request: Request):
+    if not turn_limiter.allow(client_key(request.client.host if request.client else None)):
+        raise HTTPException(status_code=429, detail=RATE_LIMITED)
 
-    if not message:
-        return {"error": "message is required"}
-
+    message, session_id = payload.message, payload.session_id
     result = run_turn(session_id, message)
 
     reply = result["messages"][-1].content
@@ -111,16 +131,26 @@ def chat(payload: dict):
 
 @app.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
-    await websocket.accept()
+    if not await accept_if_allowed(websocket, session_id):
+        return
     print(f"WebSocket connected: {session_id[:8]}...")
 
     try:
         while True:
             data = await websocket.receive_text()
-            payload = json.loads(data)
-            message = payload.get("message", "")
+            try:
+                message = str(json.loads(data).get("message", "")).strip()
+            except (ValueError, AttributeError):
+                await send_error(websocket, 'Expected JSON like {"message": "..."}')
+                continue
 
             if not message:
+                continue
+            if len(message) > MAX_MESSAGE_CHARS:
+                await send_error(websocket, f"Message too long (max {MAX_MESSAGE_CHARS} characters).")
+                continue
+            if not turn_limiter.allow(client_key(websocket.client.host if websocket.client else None)):
+                await send_error(websocket, RATE_LIMITED)
                 continue
 
             print(f"  WS [{session_id[:8]}] -> {message}")
@@ -155,13 +185,21 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
 @app.websocket("/ws/voice/{session_id}")
 async def voice_websocket_endpoint(websocket: WebSocket, session_id: str):
-    await websocket.accept()
+    if not await accept_if_allowed(websocket, session_id):
+        return
     print(f"Voice WebSocket connected: {session_id[:8]}...")
 
     try:
         while True:
             data = await websocket.receive_bytes()
             print(f"  [Voice WS] received {len(data)} bytes of audio")
+
+            if len(data) > MAX_AUDIO_BYTES:
+                await send_error(websocket, "Recording too long. Please keep it under a few minutes.")
+                continue
+            if not turn_limiter.allow(client_key(websocket.client.host if websocket.client else None)):
+                await send_error(websocket, RATE_LIMITED)
+                continue
 
             # step 1 -- transcribe
             await websocket.send_text(json.dumps({"type": "status", "message": "Transcribing..."}))
