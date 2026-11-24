@@ -27,3 +27,9 @@ evals/
 README.md
 *.mp3
 *.wav
+
+# dev tooling
+.github/
+scripts/
+pyproject.toml
+requirements-dev.txt

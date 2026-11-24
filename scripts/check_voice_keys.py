@@ -1,5 +1,14 @@
-# test_voice_keys.py
+"""Manual check: verifies the ElevenLabs and Deepgram API keys in .env.
+
+Run from the repo root:  python scripts/check_voice_keys.py
+"""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import os
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -16,8 +25,8 @@ def test_elevenlabs():
 def test_deepgram():
     print("Testing Deepgram...")
     from deepgram import DeepgramClient
-    deepgram = DeepgramClient(access_token=os.getenv("DEEPGRAM_API_KEY"))
-    print(f"  [Deepgram] OK -- client initialized")
+    DeepgramClient(api_key=os.getenv("DEEPGRAM_API_KEY"))  # same constructor the app uses
+    print("  [Deepgram] OK -- client initialized")
     
 if __name__ == "__main__":
     test_elevenlabs()

@@ -1,7 +1,18 @@
-from app.llm import get_llm
-from app.agent.graph import agent
-from langchain_core.messages import HumanMessage
+"""Interactive chat with the agent in the terminal (calls the real LLM).
+
+Run from the repo root:  python scripts/chat_cli.py
+"""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import uuid
+
+from langchain_core.messages import HumanMessage
+
+from app.agent.graph import agent
+from app.llm import get_llm
 
 
 def test_llm():
@@ -36,8 +47,7 @@ def chat(message: str, config: dict):
     return reply
 
 if __name__ == "__main__":
-    # config = {"configurable": {"thread_id": str(uuid.uuid4())}}
-    config = {"configurable": {"thread_id": "0a06368d-9403-4e81-9580-ed71f33f0d16"}}
+    config = {"configurable": {"thread_id": str(uuid.uuid4())}}
 
     print("Voice Agent Test -- type 'quit' to exit\n")
     print(f"Session: {config['configurable']['thread_id']}\n")

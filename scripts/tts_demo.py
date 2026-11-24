@@ -1,6 +1,17 @@
+"""Manual check: generates test_output.mp3 with the configured TTS provider.
+
+Run from the repo root:  python scripts/tts_demo.py
+"""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import os
+
 from dotenv import load_dotenv
-from app.voice.tts import text_to_speech, text_to_speech_bytes
+
+from app.voice.tts import text_to_speech
 
 load_dotenv()
 
@@ -12,7 +23,7 @@ def test_tts():
     )
     size = os.path.getsize(path)
     print(f"  [TTS] OK -- file size: {size} bytes")
-    print(f"  Open test_output.mp3 to hear the voice")
+    print("  Open test_output.mp3 to hear the voice")
 
 if __name__ == "__main__":
     test_tts()
