@@ -1,8 +1,9 @@
 import sqlite3
 import json
 from datetime import datetime
+from app.config import storage_path
 
-DB_PATH = "bookings.db"
+DB_PATH = storage_path("bookings.db")
 
 def init_bookings_db():
     conn = sqlite3.connect(DB_PATH)

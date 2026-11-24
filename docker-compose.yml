@@ -7,8 +7,9 @@ services:
     env_file:
       - .env
     volumes:
-      - ./data:/app/data
-      - ./chroma_db:/app/chroma_db
-      - ./memory.db:/app/memory.db
-      - ./bookings.db:/app/bookings.db
+      - ./data:/app/data:ro     # knowledge base + business config (re-ingested on every start)
+      - storage:/app/storage    # conversation memory + bookings, survives rebuilds
     restart: unless-stopped
+
+volumes:
+  storage:

@@ -1,6 +1,7 @@
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.sqlite import SqliteSaver
 import sqlite3
+from app.config import storage_path
 from app.agent.state import AgentState
 from app.agent.nodes.intent import classify_intent
 from app.agent.nodes.retriever import knowledge_retriever
@@ -53,7 +54,7 @@ def build_graph(checkpointer=None):
     graph.add_edge("booking_saver", END)
 
     if checkpointer is None:
-        conn = sqlite3.connect("memory.db", check_same_thread=False)
+        conn = sqlite3.connect(storage_path("memory.db"), check_same_thread=False)
         checkpointer = SqliteSaver(conn)
     return graph.compile(checkpointer=checkpointer)
 

@@ -1,15 +1,29 @@
+# VCS, editors, local environments
+.git/
+.gitignore
+.vscode/
+venv/
+.venv/
+.cleantest/
+
+# secrets -- passed at runtime via env_file
+.env
+
+# Python caches
 __pycache__/
 *.pyc
 *.pyo
-.env
-.git/
-.gitignore
+
+# local runtime state (the container rebuilds / keeps its own)
 *.db
 *.db-wal
 *.db-shm
 chroma_db/
+storage/
+
+# not needed at runtime
+tests/
+evals/
+README.md
 *.mp3
 *.wav
-test_*.py
-run_once_*.py
-venv/
