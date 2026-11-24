@@ -1,27 +1,40 @@
+import logging
 import os
 
+import httpx
 from deepgram import DeepgramClient
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
 def get_deepgram_client():
     return DeepgramClient(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
+STT_ATTEMPTS = 2  # one retry: dropped connections to Deepgram are usually transient
+
 def transcribe_audio_bytes(audio_bytes: bytes, mimetype: str = "audio/webm") -> str:
     """Transcribe raw audio bytes and return transcript."""
     client = get_deepgram_client()
 
-    response = client.listen.v1.media.transcribe_file(
-        request=audio_bytes,
-        model="nova-2",
-        language="en-US",
-        smart_format=True,
-        punctuate=True
-    )
+    for attempt in range(1, STT_ATTEMPTS + 1):
+        try:
+            response = client.listen.v1.media.transcribe_file(
+                request=audio_bytes,
+                model="nova-2",
+                language="en-US",
+                smart_format=True,
+                punctuate=True
+            )
+            break
+        except httpx.TransportError as e:  # network-level failure, not an API error
+            if attempt == STT_ATTEMPTS:
+                raise
+            logger.warning("Deepgram connection failed (%s), retrying", e)
 
     transcript = response.results.channels[0].alternatives[0].transcript
-    print(f"  [STT] -> '{transcript}'")
+    logger.debug("Transcript: %s", transcript)
     return transcript
 
 def transcribe_audio_file(file_path: str) -> str:

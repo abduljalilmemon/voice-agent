@@ -23,6 +23,7 @@ websockets==16.0
 
 # voice
 deepgram-sdk==6.0.1
+httpx==0.28.1  # imported directly by app/voice/stt.py
 edge-tts==7.3.1
 elevenlabs==2.39.0
 openai==2.26.0

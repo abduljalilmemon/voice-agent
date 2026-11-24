@@ -1,8 +1,11 @@
 import json
+import logging
 import sqlite3
 from datetime import datetime
 
 from app.config import storage_path
+
+logger = logging.getLogger(__name__)
 
 DB_PATH = storage_path("bookings.db")
 
@@ -50,7 +53,7 @@ def save_booking(session_id: str, business_name: str, booking_data: dict) -> int
     booking_id = cursor.lastrowid
     conn.commit()
     conn.close()
-    print(f"  [BookingStore] -> saved booking #{booking_id} for {booking_data.get('name')}")
+    logger.info("Saved booking #%s", booking_id)
     return booking_id
 
 def get_all_bookings() -> list:

@@ -1,9 +1,12 @@
+import logging
 import re
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from app.agent.state import AgentState
 from app.llm import get_llm
+
+logger = logging.getLogger(__name__)
 
 # classification should be deterministic
 llm = get_llm(temperature=0)
@@ -86,5 +89,5 @@ def classify_intent(state: AgentState) -> AgentState:
     # safety fallback
     intent = _parse_intent(response.text) or "FAQ"
 
-    print(f"  [IntentClassifier] -> {intent}")
+    logger.info("Intent: %s", intent)
     return {"intent": intent}

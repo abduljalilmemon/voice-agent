@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import json
+import logging
 import uuid
 from contextlib import asynccontextmanager
 
@@ -13,6 +14,7 @@ from pydantic import BaseModel, Field
 from app.agent.graph import agent
 from app.config import BIZ_CONFIG
 from app.integrations.booking_store import get_all_bookings
+from app.logging_setup import setup_logging
 from app.security import (
     ALLOWED_ORIGINS,
     MAX_AUDIO_BYTES,
@@ -26,12 +28,15 @@ from app.security import (
 from app.voice.stt import transcribe_audio_bytes
 from app.voice.tts import text_to_speech_bytes
 
+setup_logging()
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print(f"Voice Agent API starting -- {BIZ_CONFIG['business_name']}...")
+    logger.info("Voice Agent API starting -- %s", BIZ_CONFIG["business_name"])
     yield
-    print("Voice Agent API shutting down...")
+    logger.info("Voice Agent API shutting down")
 
 app = FastAPI(
     title="Voice Agent API",
@@ -70,6 +75,7 @@ def run_turn(session_id: str, text: str) -> dict:
     )
 
 RATE_LIMITED = "You're sending messages too quickly. Please wait a moment and try again."
+AGENT_UNAVAILABLE = "Sorry, the assistant is temporarily unavailable. Please try again in a moment."
 
 async def accept_if_allowed(websocket: WebSocket, session_id: str) -> bool:
     """Reject cross-site browser connections and malformed session ids before accepting."""
@@ -122,7 +128,11 @@ def chat(payload: ChatRequest, request: Request):
         raise HTTPException(status_code=429, detail=RATE_LIMITED)
 
     message, session_id = payload.message, payload.session_id
-    result = run_turn(session_id, message)
+    try:
+        result = run_turn(session_id, message)
+    except Exception:
+        logger.exception("Agent turn failed (session %s)", session_id[:8])
+        raise HTTPException(status_code=503, detail=AGENT_UNAVAILABLE) from None
 
     reply = result["messages"][-1].content
     booking_id = result.get("new_booking_id")
@@ -141,7 +151,7 @@ def chat(payload: ChatRequest, request: Request):
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
     if not await accept_if_allowed(websocket, session_id):
         return
-    print(f"WebSocket connected: {session_id[:8]}...")
+    logger.info("Text WebSocket connected: %s", session_id[:8])
 
     try:
         while True:
@@ -161,14 +171,19 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 await send_error(websocket, RATE_LIMITED)
                 continue
 
-            print(f"  WS [{session_id[:8]}] -> {message}")
+            logger.debug("Text message [%s]: %s", session_id[:8], message)
 
             await websocket.send_text(json.dumps({
                 "type": "typing",
                 "session_id": session_id
             }))
 
-            result = await asyncio.to_thread(run_turn, session_id, message)
+            try:
+                result = await asyncio.to_thread(run_turn, session_id, message)
+            except Exception:
+                logger.exception("Agent turn failed (session %s)", session_id[:8])
+                await send_error(websocket, AGENT_UNAVAILABLE)
+                continue
 
             reply = result["messages"][-1].content
             intent = result.get("intent", "")
@@ -187,7 +202,10 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             }))
 
     except WebSocketDisconnect:
-        print(f"WebSocket disconnected: {session_id[:8]}...")
+        logger.info("Text WebSocket disconnected: %s", session_id[:8])
+    except Exception:  # anything unexpected outside a turn, e.g. a binary frame
+        logger.exception("Text WebSocket error (session %s)", session_id[:8])
+        await websocket.close(code=1011)
 
 # ── Voice WebSocket ────────────────────────────────────────────
 
@@ -195,12 +213,12 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 async def voice_websocket_endpoint(websocket: WebSocket, session_id: str):
     if not await accept_if_allowed(websocket, session_id):
         return
-    print(f"Voice WebSocket connected: {session_id[:8]}...")
+    logger.info("Voice WebSocket connected: %s", session_id[:8])
 
     try:
         while True:
             data = await websocket.receive_bytes()
-            print(f"  [Voice WS] received {len(data)} bytes of audio")
+            logger.debug("Voice [%s]: received %d bytes of audio", session_id[:8], len(data))
 
             if len(data) > MAX_AUDIO_BYTES:
                 await send_error(websocket, "Recording too long. Please keep it under a few minutes.")
@@ -211,16 +229,16 @@ async def voice_websocket_endpoint(websocket: WebSocket, session_id: str):
 
             # step 1 -- transcribe
             await websocket.send_text(json.dumps({"type": "status", "message": "Transcribing..."}))
-            transcript = await asyncio.to_thread(transcribe_audio_bytes, data, "audio/webm")
-
-            if not transcript.strip():
-                await websocket.send_text(json.dumps({
-                    "type": "error",
-                    "message": "Could not transcribe audio. Please try again."
-                }))
+            try:
+                transcript = await asyncio.to_thread(transcribe_audio_bytes, data, "audio/webm")
+            except Exception:
+                logger.exception("Transcription failed (session %s)", session_id[:8])
+                await send_error(websocket, "Sorry, I couldn't process that audio. Please try again.")
                 continue
 
-            print(f"  [Voice WS] transcript: '{transcript}'")
+            if not transcript.strip():
+                await send_error(websocket, "Could not transcribe audio. Please try again.")
+                continue
 
             await websocket.send_text(json.dumps({
                 "type": "transcript",
@@ -230,7 +248,12 @@ async def voice_websocket_endpoint(websocket: WebSocket, session_id: str):
             # step 2 -- run agent
             await websocket.send_text(json.dumps({"type": "status", "message": "Thinking..."}))
 
-            result = await asyncio.to_thread(run_turn, session_id, transcript)
+            try:
+                result = await asyncio.to_thread(run_turn, session_id, transcript)
+            except Exception:
+                logger.exception("Agent turn failed (session %s)", session_id[:8])
+                await send_error(websocket, AGENT_UNAVAILABLE)
+                continue
 
             reply = result["messages"][-1].content
             intent = result.get("intent", "")
@@ -248,7 +271,12 @@ async def voice_websocket_endpoint(websocket: WebSocket, session_id: str):
 
             # step 3 -- text to speech
             await websocket.send_text(json.dumps({"type": "status", "message": "Generating voice..."}))
-            audio_bytes = await text_to_speech_bytes(reply)
+            try:
+                audio_bytes = await text_to_speech_bytes(reply)
+            except Exception:
+                logger.exception("Text-to-speech failed (session %s)", session_id[:8])
+                await send_error(websocket, "Voice playback is unavailable right now -- the reply is shown above.")
+                continue
 
             audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
             await websocket.send_text(json.dumps({
@@ -257,7 +285,10 @@ async def voice_websocket_endpoint(websocket: WebSocket, session_id: str):
                 "format": "mp3"
             }))
 
-            print(f"  [Voice WS] sent {len(audio_bytes)} bytes of audio")
+            logger.debug("Voice [%s]: sent %d bytes of audio", session_id[:8], len(audio_bytes))
 
     except WebSocketDisconnect:
-        print(f"Voice WebSocket disconnected: {session_id[:8]}...")
+        logger.info("Voice WebSocket disconnected: %s", session_id[:8])
+    except Exception:  # anything unexpected outside a turn, e.g. a text frame
+        logger.exception("Voice WebSocket error (session %s)", session_id[:8])
+        await websocket.close(code=1011)

@@ -1,7 +1,10 @@
 import asyncio
+import logging
 import os
 
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -32,7 +35,7 @@ def text_to_speech(text: str, output_path: str = "output.mp3") -> str:
     audio_bytes = asyncio.run(text_to_speech_bytes(text))
     with open(output_path, "wb") as f:
         f.write(audio_bytes)
-    print(f"  [TTS] -> saved to {output_path}")
+    logger.info("Saved speech to %s", output_path)
     return output_path
 
 # ── Edge TTS (free) ────────────────────────────────────────────
@@ -46,7 +49,7 @@ async def _edge_tts(text: str) -> bytes:
         if chunk["type"] == "audio":
             chunks.append(chunk["data"])
     audio_bytes = b"".join(chunks)
-    print(f"  [TTS] -> Edge | {len(audio_bytes)} bytes")
+    logger.debug("TTS (edge): %d bytes", len(audio_bytes))
     return audio_bytes
 
 # ── ElevenLabs TTS ─────────────────────────────────────────────
@@ -72,7 +75,7 @@ def _elevenlabs_tts(text: str) -> bytes:
     for chunk in audio:
         if isinstance(chunk, bytes):
             audio_bytes += chunk
-    print(f"  [TTS] -> ElevenLabs | {len(audio_bytes)} bytes")
+    logger.debug("TTS (elevenlabs): %d bytes", len(audio_bytes))
     return audio_bytes
 
 # ── OpenAI TTS ─────────────────────────────────────────────────
@@ -87,5 +90,5 @@ def _openai_tts(text: str) -> bytes:
         input=text
     )
     audio_bytes = response.content
-    print(f"  [TTS] -> OpenAI | {len(audio_bytes)} bytes")
+    logger.debug("TTS (openai): %d bytes", len(audio_bytes))
     return audio_bytes

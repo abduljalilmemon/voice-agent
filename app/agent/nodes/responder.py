@@ -1,7 +1,11 @@
+import logging
+
 from langchain_core.messages import AIMessage, SystemMessage
 
 from app.agent.state import AgentState
 from app.llm import get_llm
+
+logger = logging.getLogger(__name__)
 
 llm = get_llm()
 
@@ -23,7 +27,7 @@ def generate_response(state: AgentState) -> AgentState:
     # return static response immediately -- no LLM call
     if intent in STATIC_RESPONSES:
         reply = STATIC_RESPONSES[intent]
-        print(f"  [ResponseGenerator] -> (static) {reply}...")
+        logger.debug("Static reply for %s", intent)
         return {"messages": [AIMessage(content=reply)]}
     
     if intent in {"CONVERSATION", "GREETING", "COLLECT"}:
@@ -38,7 +42,7 @@ def generate_response(state: AgentState) -> AgentState:
             SystemMessage(content=system_content),
             *state["messages"]
         ])
-        print(f"  [ResponseGenerator] -> {response.text[:60]}...")
+        logger.debug("Reply: %s", response.text)
         return {"messages": [AIMessage(content=response.text)]}
 
 
@@ -61,5 +65,5 @@ def generate_response(state: AgentState) -> AgentState:
         *state["messages"]
     ])
 
-    print(f"  [ResponseGenerator] -> {response.text}...")
+    logger.debug("Reply: %s", response.text)
     return {"messages": [AIMessage(content=response.text)]}

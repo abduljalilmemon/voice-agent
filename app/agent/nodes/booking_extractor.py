@@ -1,9 +1,12 @@
 import json
+import logging
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.agent.state import AgentState
 from app.llm import get_llm
+
+logger = logging.getLogger(__name__)
 
 llm = get_llm()
 
@@ -60,9 +63,11 @@ def extract_booking(state: AgentState) -> AgentState:
             for field in required
         )
 
-        print(f"  [BookingExtractor] -> complete={booking_data['complete']} | {booking_data}")
+        logger.info("Booking extraction: complete=%s", booking_data["complete"])
+        logger.debug("Extracted booking data: %s", booking_data)
         return {"booking_data": booking_data}
 
     except Exception as e:
-        print(f"  [BookingExtractor] -> parse error: {e} | raw: {response.text}")
+        logger.warning("Could not parse booking extraction: %s", e)
+        logger.debug("Raw extractor output: %s", response.text)
         return {}  # keep previously collected data

@@ -1,4 +1,5 @@
 import html
+import logging
 import os
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -6,20 +7,22 @@ from email.mime.text import MIMEText
 
 from dotenv import load_dotenv
 
+logger = logging.getLogger(__name__)
+
 load_dotenv()
 
 def send_booking_email(booking_data: dict, business_name: str, owner_email: str) -> bool:
     """Send booking confirmation email to business owner."""
 
     if not owner_email:
-        print("  [Email] -> skipped, OWNER_EMAIL not set in .env")
+        logger.warning("Booking email skipped: OWNER_EMAIL not set in .env")
         return False
 
     gmail_user = os.getenv("GMAIL_USER")
     gmail_password = os.getenv("GMAIL_APP_PASSWORD")
 
     if not gmail_user or not gmail_password:
-        print("  [Email] -> skipped, no Gmail credentials in .env")
+        logger.warning("Booking email skipped: no Gmail credentials in .env")
         return False
 
     # build table rows from booking data
@@ -96,8 +99,8 @@ def send_booking_email(booking_data: dict, business_name: str, owner_email: str)
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(gmail_user, gmail_password)
             server.sendmail(gmail_user, owner_email, msg.as_string())
-        print(f"  [Email] -> sent to {owner_email}")
+        logger.info("Booking email sent to %s", owner_email)
         return True
     except Exception as e:
-        print(f"  [Email] -> failed: {e}")
+        logger.error("Booking email failed: %s", e)
         return False

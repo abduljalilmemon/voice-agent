@@ -1,5 +1,9 @@
+import logging
+
 import chromadb
 from chromadb.utils.embedding_functions import ONNXMiniLM_L6_V2
+
+logger = logging.getLogger(__name__)
 
 CHROMA_PATH = "chroma_db"
 COLLECTION_NAME = "business_knowledge"
@@ -23,15 +27,16 @@ def ingest_file(filepath: str):
     existing = collection.get()
     if existing["ids"]:
         collection.delete(ids=existing["ids"])
-        print(f"  Cleared {len(existing['ids'])} existing chunks")
+        logger.info("Cleared %d existing chunks", len(existing["ids"]))
 
     collection.add(
         documents=chunks,
         ids=[f"chunk_{i}" for i in range(len(chunks))]
     )
-    print(f"  Ingested {len(chunks)} chunks from {filepath}")
+    logger.info("Ingested %d chunks from %s", len(chunks), filepath)
 
 if __name__ == "__main__":
-    print("Ingesting knowledge base...")
+    from app.logging_setup import setup_logging
+
+    setup_logging()
     ingest_file("data/knowledge_base/dental_clinic.txt")
-    print("Done.")
