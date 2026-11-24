@@ -1,4 +1,5 @@
 import os
+
 from deepgram import DeepgramClient
 from dotenv import load_dotenv
 

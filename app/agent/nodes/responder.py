@@ -1,6 +1,7 @@
+from langchain_core.messages import AIMessage, SystemMessage
+
 from app.agent.state import AgentState
 from app.llm import get_llm
-from langchain_core.messages import SystemMessage, AIMessage
 
 llm = get_llm()
 

@@ -1,13 +1,16 @@
-from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.sqlite import SqliteSaver
 import sqlite3
-from app.config import storage_path
-from app.agent.state import AgentState
-from app.agent.nodes.intent import classify_intent
-from app.agent.nodes.retriever import knowledge_retriever
-from app.agent.nodes.responder import generate_response
+
+from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.graph import END, StateGraph
+
 from app.agent.nodes.booking_extractor import extract_booking
 from app.agent.nodes.booking_saver import save_completed_booking
+from app.agent.nodes.intent import classify_intent
+from app.agent.nodes.responder import generate_response
+from app.agent.nodes.retriever import knowledge_retriever
+from app.agent.state import AgentState
+from app.config import storage_path
+
 
 def route_after_response(state: AgentState) -> str:
     # once a booking is saved, stop extracting -- prevents duplicate saves

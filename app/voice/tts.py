@@ -1,5 +1,6 @@
-import os
 import asyncio
+import os
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -51,8 +52,8 @@ async def _edge_tts(text: str) -> bytes:
 # ── ElevenLabs TTS ─────────────────────────────────────────────
 
 def _elevenlabs_tts(text: str) -> bytes:
-    from elevenlabs.client import ElevenLabs
     from elevenlabs import VoiceSettings
+    from elevenlabs.client import ElevenLabs
     voice_id = os.getenv("ELEVENLABS_VOICE_ID", VOICES["elevenlabs"])
     client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
     audio = client.text_to_speech.convert(

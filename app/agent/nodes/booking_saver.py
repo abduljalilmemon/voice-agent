@@ -3,6 +3,7 @@ from app.config import BIZ_CONFIG, OWNER_EMAIL
 from app.integrations.booking_store import save_booking
 from app.integrations.notifications import send_booking_email
 
+
 def save_completed_booking(state: AgentState) -> AgentState:
     """Persist a completed booking exactly once per conversation and notify the owner."""
     if state.get("booking_id"):

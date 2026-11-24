@@ -1,23 +1,31 @@
+import asyncio
+import base64
+import json
+import uuid
+from contextlib import asynccontextmanager
+
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from contextlib import asynccontextmanager
-import asyncio
-import uuid
-import json
-import base64
+from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 
 from app.agent.graph import agent
-from app.voice.tts import text_to_speech_bytes
-from app.voice.stt import transcribe_audio_bytes
-from app.integrations.booking_store import get_all_bookings
 from app.config import BIZ_CONFIG
+from app.integrations.booking_store import get_all_bookings
 from app.security import (
-    ALLOWED_ORIGINS, MAX_AUDIO_BYTES, MAX_MESSAGE_CHARS, MAX_SESSION_ID_CHARS,
-    client_key, require_admin, turn_limiter, websocket_origin_allowed,
+    ALLOWED_ORIGINS,
+    MAX_AUDIO_BYTES,
+    MAX_MESSAGE_CHARS,
+    MAX_SESSION_ID_CHARS,
+    client_key,
+    require_admin,
+    turn_limiter,
+    websocket_origin_allowed,
 )
-from langchain_core.messages import HumanMessage
+from app.voice.stt import transcribe_audio_bytes
+from app.voice.tts import text_to_speech_bytes
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

@@ -6,10 +6,13 @@ Results with groq / openai/gpt-oss-20b, 3 runs per case:
   last-message-only classifier : 44/54 = 81%
   context-aware classifier     : 54/54 = 100%
 """
-import sys, time
+import sys
+import time
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
+
 from app.agent.nodes.intent import classify_intent
 
 A, U = AIMessage, HumanMessage
@@ -40,7 +43,9 @@ for hist, msg, exp in CASES:
     for _ in range(runs):
         got.append(classify_intent({"messages": hist + [U(msg)]})["intent"])
         time.sleep(0.3)
-    hits = sum(g in exp for g in got); ok += hits; total += runs
+    hits = sum(g in exp for g in got)
+    ok += hits
+    total += runs
     mark = "PASS" if hits == runs else "FAIL"
     print(f"{mark} {msg!r:45} expected={'/'.join(sorted(exp)):22} got={got}")
 print(f"\naccuracy: {ok}/{total} = {ok/total:.0%}")

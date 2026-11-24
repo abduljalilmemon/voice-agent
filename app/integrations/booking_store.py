@@ -1,6 +1,7 @@
-import sqlite3
 import json
+import sqlite3
 from datetime import datetime
+
 from app.config import storage_path
 
 DB_PATH = storage_path("bookings.db")

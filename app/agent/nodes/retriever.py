@@ -16,6 +16,6 @@ def knowledge_retriever(state: AgentState) -> AgentState:
     if context:
         print(f"  [KnowledgeRetriever] -> found {len(context)} chars of context")
     else:
-        print(f"  [KnowledgeRetriever] -> no relevant context found")
+        print("  [KnowledgeRetriever] -> no relevant context found")
 
     return {"context": context}
