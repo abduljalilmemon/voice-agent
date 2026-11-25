@@ -27,16 +27,14 @@ from tests.fakes import FakeLLM  # noqa: E402
 
 @pytest.fixture
 def fake_llms(monkeypatch):
-    """Install fake LLMs into the agent nodes: fake_llms(intents=[...], replies=[...], extractions=[...])."""
-    import app.agent.nodes.booking_extractor as extractor_node
-    import app.agent.nodes.intent as intent_node
+    """Install fake LLMs into the agent nodes: fake_llms(turns=[understood(...), ...], replies=[...])."""
     import app.agent.nodes.responder as responder_node
+    import app.agent.nodes.understand as understand_node
 
-    def install(intents=(), replies=(), extractions=()):
-        fakes = {"intent": FakeLLM(intents), "responder": FakeLLM(replies), "extractor": FakeLLM(extractions)}
-        monkeypatch.setattr(intent_node, "llm", fakes["intent"])
+    def install(turns=(), replies=()):
+        fakes = {"understand": FakeLLM(turns), "responder": FakeLLM(replies)}
+        monkeypatch.setattr(understand_node, "llm", fakes["understand"])
         monkeypatch.setattr(responder_node, "llm", fakes["responder"])
-        monkeypatch.setattr(extractor_node, "llm", fakes["extractor"])
         return fakes
 
     return install

@@ -1,6 +1,8 @@
 import os
 
 from dotenv import load_dotenv
+from langchain_core.exceptions import OutputParserException
+from pydantic import BaseModel, ValidationError
 
 load_dotenv()
 
@@ -12,7 +14,12 @@ DEFAULT_MODELS = {
     "groq": "openai/gpt-oss-20b",
 }
 
-def get_llm(temperature: float = 0.7):
+def get_llm(temperature: float = 0.7, schema: type[BaseModel] | None = None, reasoning_effort: str | None = None):
+    """Chat model for the configured provider.
+
+    schema: invoke() returns a validated instance of this Pydantic model (native JSON-schema output).
+    reasoning_effort: for Groq's gpt-oss reasoning models ("low" | "medium" | "high"); ignored elsewhere.
+    """
     provider = os.getenv("LLM_PROVIDER", "groq").lower()
     if provider not in DEFAULT_MODELS:
         raise ValueError(f"Unknown LLM provider: {provider}")
@@ -22,24 +29,27 @@ def get_llm(temperature: float = 0.7):
         from langchain_anthropic import ChatAnthropic
         # Current Claude models reject non-default temperature, so it is not passed.
         # Low effort keeps thinking short -- replies are spoken, so latency matters most.
-        return ChatAnthropic(
-            model=model,
-            effort=os.getenv("ANTHROPIC_EFFORT", "low")
-        )
+        llm = ChatAnthropic(model=model, effort=os.getenv("ANTHROPIC_EFFORT", "low"))
     elif provider == "openai":
         from langchain_openai import ChatOpenAI
-        return ChatOpenAI(model=model, temperature=temperature)
+        llm = ChatOpenAI(model=model, temperature=temperature)
     elif provider == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI
-        return ChatGoogleGenerativeAI(model=model, temperature=temperature)
+        llm = ChatGoogleGenerativeAI(model=model, temperature=temperature)
     else:  # groq
-        from groq import BadRequestError
         from langchain_groq import ChatGroq
+        extra = {"reasoning_effort": reasoning_effort} if reasoning_effort and "gpt-oss" in model else {}
+        llm = ChatGroq(model=model, temperature=temperature, groq_api_key=os.getenv("GROQ_API_KEY"), **extra)
+
+    retry_on: tuple[type[Exception], ...] = ()
+    if schema is not None:
+        llm = llm.with_structured_output(schema, method="json_schema")
+        retry_on += (OutputParserException, ValidationError)  # a malformed object is worth one more try
+    if provider == "groq":
+        from groq import BadRequestError
         # gpt-oss on Groq occasionally emits a malformed tool call instead of text, which the API
         # rejects with 400 "tool_use_failed". It's sampling noise, so a retry almost always succeeds.
-        return ChatGroq(
-            model=model,
-            temperature=temperature,
-            groq_api_key=os.getenv("GROQ_API_KEY")
-        ).with_retry(retry_if_exception_type=(BadRequestError,), stop_after_attempt=3,
-                     wait_exponential_jitter=False)
+        retry_on += (BadRequestError,)
+    if retry_on:
+        llm = llm.with_retry(retry_if_exception_type=retry_on, stop_after_attempt=3, wait_exponential_jitter=False)
+    return llm

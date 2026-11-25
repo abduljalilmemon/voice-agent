@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.agent.nodes.intent import classify_intent
+from app.agent.nodes.understand import understand
 
 A, U = AIMessage, HumanMessage
 CASES = [
@@ -41,7 +41,7 @@ ok = total = 0
 for hist, msg, exp in CASES:
     got = []
     for _ in range(runs):
-        got.append(classify_intent({"messages": hist + [U(msg)]})["intent"])
+        got.append(understand({"messages": hist + [U(msg)]})["intent"])
         time.sleep(0.3)
     hits = sum(g in exp for g in got)
     ok += hits

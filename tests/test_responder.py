@@ -1,12 +1,9 @@
-import json
-
 from langchain_core.messages import HumanMessage
 
-import app.agent.nodes.intent as intent_node
 import app.agent.nodes.responder as responder
 import app.knowledge.retriever as retriever
 from app.config import BIZ_CONFIG
-from tests.fakes import FakeLLM
+from tests.fakes import FakeLLM, understood
 
 PHONE = BIZ_CONFIG["phone"]
 
@@ -69,10 +66,10 @@ def test_no_booking_guidance_outside_a_booking(monkeypatch):
 
 
 def test_reply_knows_the_booking_was_saved_on_the_same_turn(fake_llms, saved_bookings, agent):
-    complete = json.dumps({"name": "Sara", "date": "Friday", "time": "10am", "phone": "0300"})
-    fakes = fake_llms(intents=["BOOK"], replies=["ok"], extractions=[complete])
+    fakes = fake_llms(turns=[understood("BOOK", name="Sara", date="Friday", time="10am", phone="0300")],
+                      replies=["ok"])
     agent("book Sara for Friday 10am, phone 0300")
-    # extraction + save now run before the reply, so the reply prompt already knows
+    # understanding + save run before the reply, so the reply prompt already knows
     assert "has just been saved" in fakes["responder"].calls[0][0].content
 
 
@@ -86,24 +83,6 @@ def test_markdown_is_stripped_before_text_to_speech(monkeypatch):
 def test_plain_replies_are_unchanged(monkeypatch):
     reply, _ = _reply(monkeypatch, {"intent": "FAQ"}, "We open at 9 AM - 7 PM, Monday to Saturday.")
     assert reply == "We open at 9 AM - 7 PM, Monday to Saturday."
-
-
-# ── Classifier knows a booking is in progress ──────────────────
-
-def _classifier_input(monkeypatch, state):
-    fake = FakeLLM(["COLLECT"])
-    monkeypatch.setattr(intent_node, "llm", fake)
-    intent_node.classify_intent({"messages": [HumanMessage(content="0300 1234567")], **state})
-    return fake.calls[0][-1].content
-
-
-def test_classifier_is_told_a_booking_is_in_progress(monkeypatch):
-    assert "A booking is in progress" in _classifier_input(monkeypatch, {"booking_data": {"name": "Sara"}})
-
-
-def test_classifier_not_told_once_the_booking_is_saved(monkeypatch):
-    state = {"booking_data": {"name": "Sara"}, "booking_id": 3}
-    assert "A booking is in progress" not in _classifier_input(monkeypatch, state)
 
 
 # ── Retrieval relevance cut-off ────────────────────────────────

@@ -7,6 +7,7 @@ On Groq's free tier (8K tokens/minute) set EVAL_TURN_DELAY=25 to stay under the 
 """
 import os
 import re
+import statistics
 import sys
 import time
 import uuid
@@ -15,6 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from groq import RateLimitError  # noqa: E402
+from langchain_core.callbacks import BaseCallbackHandler  # noqa: E402
 from langchain_core.messages import HumanMessage  # noqa: E402
 from langgraph.checkpoint.memory import MemorySaver  # noqa: E402
 
@@ -85,18 +87,41 @@ CONVERSATIONS = {
 }
 
 
+class UsageCounter(BaseCallbackHandler):
+    """Counts LLM calls and tokens for every model call made inside a turn (retries included)."""
+
+    def __init__(self):
+        self.calls = 0
+        self.tokens = 0
+
+    def on_llm_end(self, response, **kwargs):
+        self.calls += 1
+        for generations in response.generations:
+            for generation in generations:
+                usage = getattr(getattr(generation, "message", None), "usage_metadata", None) or {}
+                self.tokens += usage.get("total_tokens", 0)
+
+
+TURN_STATS = []  # (llm_calls, tokens, seconds) for turns that weren't interrupted by a rate limit
+
+
 def run_turn(agent, session, text, attempts=4):
     """One turn. Free-tier rate limits (429) are quota, not agent quality: wait and resume.
 
     Resuming with invoke(None) continues the failed run from its checkpoint, so the user's
     message isn't added to the conversation twice.
     """
-    config = {"configurable": {"thread_id": session}}
+    usage = UsageCounter()
+    config = {"configurable": {"thread_id": session}, "callbacks": [usage]}
     payload = {"messages": [HumanMessage(content=text)], "intent": "", "context": "",
                "session_id": session, "new_booking_id": None}
     for attempt in range(attempts):
         try:
-            return agent.invoke(payload, config=config)
+            started = time.perf_counter()
+            result = agent.invoke(payload, config=config)
+            if attempt == 0:  # a resumed turn's cost and time aren't comparable
+                TURN_STATS.append((usage.calls, usage.tokens, time.perf_counter() - started))
+            return result
         except RateLimitError:
             if attempt == attempts - 1:
                 raise
@@ -138,6 +163,10 @@ def main():
                 print(f)
     print(f"\nchecks passed: {passed}/{total} = {passed / total:.0%}")
     print(f"voice-friendly replies (no markdown): {spoken_ok}/{spoken_total} = {spoken_ok / spoken_total:.0%}")
+    if TURN_STATS:
+        calls, tokens, seconds = zip(*TURN_STATS, strict=True)
+        print(f"per turn ({len(TURN_STATS)} turns): {sum(calls) / len(calls):.2f} LLM calls, "
+              f"{sum(tokens) / len(tokens):.0f} tokens, median {statistics.median(seconds):.2f}s")
 
 
 if __name__ == "__main__":

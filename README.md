@@ -25,10 +25,11 @@ Agent:   You're booked for a cleaning this Friday at 10 AM, Sara. The clinic wil
 
 ## Highlights
 
-- **Multi-node LangGraph agent**: intent classification → knowledge-base retrieval → booking
-  extraction → booking save → reply. Conversation memory persists per session in SQLite.
-- **Grounded, honest replies**: booking extraction runs *before* the reply, so the agent knows
-  exactly what has been collected and never says "you're booked" before the booking is saved.
+- **LangGraph agent with two LLM calls per turn**: one structured call reads the intent *and* any
+  booking details, then knowledge-base retrieval, booking save, and the reply. Conversation memory
+  persists per session in SQLite.
+- **Grounded, honest replies**: booking details are understood and saved *before* the reply, so the
+  agent knows exactly what has been collected and never says "you're booked" before it is saved.
 - **Measured with evals**, not just eyeballed: an intent-classification eval and a multi-turn
   conversation eval that run against the real LLM ([results](#results)).
 - **Concurrent by design**: blocking LLM / speech calls run off the event loop, so one caller never
@@ -39,7 +40,7 @@ Agent:   You're booked for a cleaning this Friday at 10 AM, Sara. The clinic wil
   connection stays open; the text reply is still delivered when voice fails.
 - **Swappable providers** via `.env`: Groq / Anthropic Claude / OpenAI / Gemini for the LLM;
   Edge TTS (free) / ElevenLabs / OpenAI for speech.
-- **Tested**: 61 offline unit tests (fake LLMs, no API keys) and a Docker build in GitHub Actions CI.
+- **Tested**: 59 offline unit tests (fake LLMs, no API keys) and a Docker build in GitHub Actions CI.
 
 ## Architecture
 
@@ -51,11 +52,9 @@ flowchart LR
     API -- text --> G
     subgraph G[LangGraph agent]
         direction LR
-        I[Intent<br/>classifier] --> R[Knowledge<br/>retriever]
-        R -- booking turn --> X[Booking<br/>extractor]
-        X -- complete --> S[Booking<br/>saver]
+        U[Understand<br/>intent + booking details] --> R[Knowledge<br/>retriever]
+        R -- booking complete --> S[Booking<br/>saver]
         R --> P[Reply<br/>generator]
-        X --> P
         S --> P
     end
     R <--> C[(ChromaDB)]
@@ -68,9 +67,8 @@ flowchart LR
 
 | Node | What it does |
 |---|---|
-| Intent classifier | Labels the latest message (`GREETING`, `FAQ`, `BOOK`, `COLLECT`, `COMPLAINT`, `ESCALATE`, `CONVERSATION`, `OUT_OF_SCOPE`) using the last few messages and whether a booking is in progress, so short answers like "yes" or "Sara Khan" are read in context. |
+| Understand | One structured-output LLM call (validated against a Pydantic schema) that labels the latest message (`GREETING`, `FAQ`, `BOOK`, `COLLECT`, `COMPLAINT`, `ESCALATE`, `CONVERSATION`, `OUT_OF_SCOPE`) and pulls out any booking details in it. It sees the last few messages and what's been collected so far, so short answers like "yes" or "Sara Khan" are read in context. New details are merged into the booking in code (a correction overrides the old value), and completeness (name, date, time, phone) is decided in code, not by the LLM. |
 | Knowledge retriever | Embeds the question (all-MiniLM-L6-v2 via ONNX Runtime) and keeps only chunks within a calibrated distance cut-off, so off-topic questions get no misleading context. |
-| Booking extractor | On booking turns, extracts name, date, time and phone as JSON. Completeness is computed in code, not trusted from the LLM. |
 | Booking saver | Saves the booking once per conversation and emails the owner. |
 | Reply generator | One prompt with the business profile, today's date, voice rules and the real booking state. Markdown is stripped before speech. Off-topic and escalation replies are fixed text, with no LLM call. |
 
@@ -86,6 +84,9 @@ All numbers were measured in this repository; the scripts are in [`evals/`](eval
 | 4 simultaneous chats, time vs. a single chat | 4.0–6.5× | **1.6×** |
 | `/health` response time while those chats run | 0.6–1.2 s | **0.02 s** |
 | Knowledge-base lookup per FAQ question | ~1.2 s | **~0.1 s** |
+| LLM calls per turn (intent + booking merged into one structured call) | 2.23 | **1.85** |
+| Agent time per turn, median (conversation eval) | 1.02 s | **0.79 s** |
+| Tokens per turn | 1,419 | **1,360** |
 
 The conversation eval runs scripted chats through the full agent and checks each reply. It checks
 that the agent remembers the caller's name, knows which business it is, never claims a booking before
@@ -93,9 +94,15 @@ it is saved, gives a real way to reach a human, quotes prices from the knowledge
 off-topic questions. In the baseline, a recurring Groq error (`tool_use_failed`) crashed some
 conversations early, so fewer checks ran.
 
-End-to-end latency for one voice turn is currently about **6–8 seconds** (speech-to-text ~1.5–2 s,
-agent ~2.5 s, speech synthesis ~2–3 s; a few measurements on a home connection). Speech is not
-streamed yet; see [Limitations](#limitations).
+Merging intent classification and booking extraction cut calls and latency more than tokens: the
+merged prompt and its JSON schema are sent on every turn, while the old extractor only ran on
+booking turns. Low reasoning effort on the merged call (it only labels one message) is what brought
+tokens and latency down, with no change in either eval.
+
+A voice turn measured **6–8 seconds** end to end before the latest agent optimisations: speech-to-text
+~1.5–2 s, agent ~2.5 s, speech synthesis ~2–3 s (a few measurements on a home connection). The agent
+part is now a median 0.8 s in the conversation eval, so speech-to-text and synthesis dominate. Speech
+is not streamed yet; see [Limitations](#limitations).
 
 ## Quick start
 
@@ -170,7 +177,7 @@ curl localhost:8000/bookings -H "X-API-Key: $ADMIN_API_KEY"
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                 # 61 tests, offline: fake LLMs, temp storage, no API keys or email
+pytest                 # 59 tests, offline: fake LLMs, temp storage, no API keys or email
 ruff check .
 
 # evals call the real LLM configured in .env and use API credits
@@ -184,7 +191,7 @@ chat in the terminal, check voice keys) are in [`scripts/`](scripts/).
 
 ```
 app/
-  agent/          LangGraph graph, state and nodes (intent, retriever, booking extractor/saver, responder)
+  agent/          LangGraph graph, state and nodes (understand, retriever, booking saver, responder)
   knowledge/      knowledge-base ingestion and retrieval (ChromaDB)
   voice/          speech-to-text (Deepgram) and text-to-speech providers
   integrations/   booking storage (SQLite) and email notifications
@@ -208,14 +215,13 @@ These are known gaps, listed here rather than hidden:
   isn't checked. Each conversation can make one booking, and it can't be changed in the chat.
 - **Single-instance storage**: SQLite and the in-memory rate limiter work for one server process.
   Behind a reverse proxy, the rate limiter would need the real client IP from proxy headers.
-- **Groq free tier**: a turn uses about 3,000 tokens over three LLM calls, and the free tier allows
-  8,000 tokens per minute, so a paid tier is needed for real traffic.
+- **Groq free tier**: a turn uses about 1,400 tokens over two LLM calls, and the free tier allows
+  8,000 tokens per minute (roughly five turns a minute), so a paid tier is needed for real traffic.
 - The OpenAI and Gemini default model names are configurable but not verified against live APIs.
 
 ## Roadmap
 
 - [ ] Streaming speech-to-text and text-to-speech, with interruption and no push-to-talk
-- [ ] Merge intent classification and booking extraction into one structured LLM call
 - [ ] Convert spoken dates to real dates and check availability
 - [ ] Google Calendar integration for real appointment slots
 - [ ] Twilio integration for real phone calls
