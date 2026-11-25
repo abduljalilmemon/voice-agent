@@ -31,7 +31,8 @@ ESCALATE     = asks for a human
 CONVERSATION = asks about something said earlier in this chat
 OUT_OF_SCOPE = anything unrelated to the business
 
-A short answer is COLLECT only if the agent just asked for booking details.
+A short answer is COLLECT only if the agent just asked for booking details, or a booking is in
+progress and the answer gives a booking detail (name, phone, email, date, time).
 A business question asked in the middle of a booking is still FAQ.
 Reply with ONLY the intent word."""
 
@@ -55,9 +56,14 @@ FEW_SHOT_EXAMPLES = [
 def _speaker(message) -> str:
     return "User" if isinstance(message, HumanMessage) else "Agent"
 
-def _format_input(history: list[str], user_message: str) -> str:
+def _format_input(history: list[str], user_message: str, booking_in_progress: bool = False) -> str:
     conversation = "\n".join(history) if history else "(start of conversation)"
-    return f"Recent conversation:\n{conversation}\n\nLatest user message: {user_message}"
+    status = "\nA booking is in progress (details are still being collected).\n" if booking_in_progress else ""
+    return f"Recent conversation:\n{conversation}\n{status}\nLatest user message: {user_message}"
+
+def _booking_in_progress(state: AgentState) -> bool:
+    data = state.get("booking_data") or {}
+    return any(data.get(field) for field in ("name", "date", "time", "phone")) and not state.get("booking_id")
 
 def _few_shot_messages() -> list:
     messages = []
@@ -83,7 +89,7 @@ def classify_intent(state: AgentState) -> AgentState:
     response = llm.invoke([
         SystemMessage(content=INTENT_PROMPT),
         *FEW_SHOT,
-        HumanMessage(content=_format_input(history, latest.content))
+        HumanMessage(content=_format_input(history, latest.content, _booking_in_progress(state)))
     ])
 
     # safety fallback

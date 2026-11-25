@@ -1,69 +1,103 @@
 import logging
+import re
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from langchain_core.messages import AIMessage, SystemMessage
 
 from app.agent.state import AgentState
+from app.config import BIZ_CONFIG
 from app.llm import get_llm
 
 logger = logging.getLogger(__name__)
 
 llm = get_llm()
 
-SYSTEM_PROMPT = """You are a friendly, professional voice assistant for a business.
-Keep responses concise and natural -- this will be spoken aloud.
-Maximum 2-3 sentences per response.
-Never use bullet points or markdown.
-Never answer questions unrelated to the business under any circumstances."""
+NAME = BIZ_CONFIG["business_name"]
+PHONE = BIZ_CONFIG["phone"]
+
+BASE_PROMPT = f"""You are the voice assistant for {NAME}, a {BIZ_CONFIG["business_type"]}. You answer customer calls and chats.
+
+Business details:
+- Address: {BIZ_CONFIG["address"]}
+- Phone: {PHONE}
+- Email: {BIZ_CONFIG["email"]}
+- Hours: {BIZ_CONFIG["hours"]}
+
+Your replies are spoken aloud by text-to-speech:
+- 1 to 3 short sentences of plain, natural conversation.
+- No markdown, bullet points, numbered lists or emoji.
+
+Only help with things related to {NAME}. Never invent prices, services, staff or policies: if the
+information you have doesn't answer the question, say so and suggest calling {PHONE}.
+You may use anything the customer told you earlier in this conversation, such as their name."""
+
+INTENT_GUIDANCE = {
+    "GREETING": f"Respond warmly to the greeting, thanks or goodbye. If greeting, introduce yourself as {NAME}'s assistant.",
+    "FAQ": "Answer the question using the business details and any relevant information below.",
+    "COMPLAINT": f"The customer is unhappy. Apologise sincerely, acknowledge the problem, and offer that the team can sort it out on {PHONE}.",
+    "CONVERSATION": "The customer is asking about this conversation. Answer from the conversation history.",
+    "BOOK": "The customer wants an appointment.",
+    "COLLECT": "The customer is giving details for their appointment.",
+}
 
 STATIC_RESPONSES = {
-    "OUT_OF_SCOPE": "I can only help with questions about our business, such as services, hours, pricing, or bookings. Is there anything like that I can help you with?",
-    "ESCALATE": "Of course, let me connect you with a team member right away. Please hold for a moment."
+    "OUT_OF_SCOPE": f"I can only help with questions about {NAME}, like our services, prices, opening hours or appointments. What can I help you with?",
+    # no live transfer exists, so be honest and give a way to reach a person
+    "ESCALATE": f"I can't transfer you from here, but you can reach our team directly on {PHONE}, {BIZ_CONFIG['hours']} Is there anything I can help with in the meantime?",
 }
+
+# asked in this order, one at a time
+BOOKING_FIELDS = [("name", "their full name"), ("date", "the preferred date"),
+                  ("time", "the preferred time"), ("phone", "a phone number")]
+
+def booking_guidance(state: AgentState) -> str:
+    """Tell the model the real booking state, so it never has to guess whether it's booked."""
+    data = state.get("booking_data") or {}
+    summary = ", ".join(f"{field}: {data[field]}" for field in ("name", "service", "date", "time", "phone")
+                        if data.get(field))
+
+    if state.get("new_booking_id"):
+        return (f"The appointment request has just been saved ({summary}). Confirm the details back to "
+                f"the customer and say the clinic will call them to confirm.")
+    if state.get("booking_id"):
+        return (f"An appointment was already booked in this conversation ({summary}). Changes can't be made "
+                f"here, so for changes ask them to call {PHONE}.")
+
+    if not data and state.get("intent") not in {"BOOK", "COLLECT"}:
+        return ""  # no booking in progress
+    missing = [label for field, label in BOOKING_FIELDS if not data.get(field)]
+    if "the preferred date" in missing and "the preferred time" in missing:
+        missing.remove("the preferred time")
+        missing[missing.index("the preferred date")] = "the preferred date and time"
+    if not missing:
+        return ""
+    collected = f"Collected so far: {summary}. " if summary else ""
+    return (f"Booking in progress. {collected}Ask only for the next missing item: {missing[0]}. "
+            f"The appointment is NOT booked yet, so never say it is confirmed or booked.")
+
+def spoken(text: str) -> str:
+    """Safety net for text-to-speech: strip any markdown the model produced anyway."""
+    text = re.sub(r"\*\*|__|`|^#+\s*", "", text, flags=re.M)
+    text = re.sub(r"^\s*(?:[-*•]|\d+\.)\s+", "", text, flags=re.M)
+    return re.sub(r"\s*\n+\s*", " ", text).strip()
 
 def generate_response(state: AgentState) -> AgentState:
     intent = state.get("intent", "FAQ")
-    context = state.get("context", "")
 
     # return static response immediately -- no LLM call
     if intent in STATIC_RESPONSES:
-        reply = STATIC_RESPONSES[intent]
         logger.debug("Static reply for %s", intent)
-        return {"messages": [AIMessage(content=reply)]}
-    
-    if intent in {"CONVERSATION", "GREETING", "COLLECT"}:
-        system_content = """You are a friendly voice assistant for a service business.
-    If the user is providing booking information, acknowledge it warmly and ask 
-    for the next missing piece of information in this order:
-    1. Full name (if missing)
-    2. Preferred date and time (if missing)
-    3. Phone number (if missing)
-    Only ask for ONE thing at a time. Check conversation history before asking."""
-        response = llm.invoke([
-            SystemMessage(content=system_content),
-            *state["messages"]
-        ])
-        logger.debug("Reply: %s", response.text)
-        return {"messages": [AIMessage(content=response.text)]}
+        return {"messages": [AIMessage(content=STATIC_RESPONSES[intent])]}
 
+    today = datetime.now(ZoneInfo(BIZ_CONFIG["timezone"])).strftime("%A %d %B %Y")
+    parts = [BASE_PROMPT, f"Today is {today}.", INTENT_GUIDANCE.get(intent, INTENT_GUIDANCE["FAQ"])]
+    if guidance := booking_guidance(state):
+        parts.append(guidance)
+    if context := state.get("context"):
+        parts.append(f"Relevant business information:\n{context}")
 
-    system_content = SYSTEM_PROMPT
-    if context:
-        system_content += f"\n\nRelevant business information:\n{context}"
-    if intent == "COMPLAINT":
-        system_content += "\n\nThe user is frustrated. Be extra empathetic and apologetic."
-    elif intent == "BOOK":
-        system_content += """
-    The user wants to book an appointment. Collect information in this order:
-    1. First ask for their full name (if not already provided)
-    2. Then ask for preferred date and time (if not already provided)
-    3. Then ask for phone number (if not already provided)
-    Only ask for ONE piece of missing information per response.
-    Never ask for everything at once.
-    Check the conversation history before asking -- don't ask for info already given."""
-    response = llm.invoke([
-        SystemMessage(content=system_content),
-        *state["messages"]
-    ])
-
-    logger.debug("Reply: %s", response.text)
-    return {"messages": [AIMessage(content=response.text)]}
+    response = llm.invoke([SystemMessage(content="\n\n".join(parts)), *state["messages"]])
+    reply = spoken(response.text)
+    logger.debug("Reply: %s", reply)
+    return {"messages": [AIMessage(content=reply)]}

@@ -1,9 +1,3 @@
-BUSINESS NAME: City Dental Clinic
-LOCATION: 123 Main Street, Karachi, Pakistan
-PHONE: +92-21-1234567
-EMAIL: info@citydental.com
-HOURS: Monday to Saturday, 9 AM to 7 PM. Closed on Sundays.
-
 SERVICES:
 - General checkup and cleaning: PKR 1,500
 - Teeth whitening: PKR 8,000

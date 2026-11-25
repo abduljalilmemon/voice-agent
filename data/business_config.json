@@ -1,4 +1,9 @@
 {
     "business_name": "City Dental Clinic",
+    "business_type": "dental clinic",
+    "address": "123 Main Street, Karachi, Pakistan",
+    "phone": "+92-21-1234567",
+    "email": "info@citydental.com",
+    "hours": "Monday to Saturday, 9 AM to 7 PM. Closed on Sundays.",
     "timezone": "Asia/Karachi"
 }

@@ -2,6 +2,7 @@
 
 # config
 python-dotenv==1.2.2
+tzdata==2026.6  # IANA timezones for zoneinfo (Windows has none built in)
 
 # agent + LLM providers
 langchain-core==1.2.18

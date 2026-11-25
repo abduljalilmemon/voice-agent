@@ -33,9 +33,13 @@ def get_llm(temperature: float = 0.7):
         from langchain_google_genai import ChatGoogleGenerativeAI
         return ChatGoogleGenerativeAI(model=model, temperature=temperature)
     else:  # groq
+        from groq import BadRequestError
         from langchain_groq import ChatGroq
+        # gpt-oss on Groq occasionally emits a malformed tool call instead of text, which the API
+        # rejects with 400 "tool_use_failed". It's sampling noise, so a retry almost always succeeds.
         return ChatGroq(
             model=model,
             temperature=temperature,
             groq_api_key=os.getenv("GROQ_API_KEY")
-        )
+        ).with_retry(retry_if_exception_type=(BadRequestError,), stop_after_attempt=3,
+                     wait_exponential_jitter=False)

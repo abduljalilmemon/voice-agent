@@ -8,7 +8,7 @@ from app.llm import get_llm
 
 logger = logging.getLogger(__name__)
 
-llm = get_llm()
+llm = get_llm(temperature=0)  # extraction should be deterministic
 
 EXTRACT_PROMPT = """You are a data extractor. Extract booking information from the conversation.
 
