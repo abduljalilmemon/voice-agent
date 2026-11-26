@@ -94,3 +94,29 @@ def test_retriever_drops_chunks_beyond_the_distance_cutoff(monkeypatch):
 
     monkeypatch.setattr(retriever, "get_collection", lambda: FakeCollection())
     assert retriever.retrieve("anything") == "close\n\nborderline"
+
+
+# ── Conversation length is bounded ─────────────────────────────
+
+def test_reply_sees_only_recent_messages_starting_with_the_customer(monkeypatch):
+    from langchain_core.messages import AIMessage
+
+    history = []
+    for i in range(10):
+        history += [HumanMessage(content=f"user {i}"), AIMessage(content=f"agent {i}")]
+    history.append(HumanMessage(content="latest"))
+    fake = FakeLLM(["ok"])
+    monkeypatch.setattr(responder, "llm", fake)
+    responder.generate_response({"messages": history, "intent": "FAQ"})
+    sent = fake.calls[0][1:]  # after the system prompt
+    assert len(sent) <= responder.REPLY_HISTORY
+    assert isinstance(sent[0], HumanMessage) and sent[-1].content == "latest"
+
+
+def test_stored_history_is_capped(fake_llms, saved_bookings, agent):
+    turns = 30  # 60 messages without a cap
+    fake_llms(turns=[understood("GREETING")] * turns, replies=[f"r{i}" for i in range(turns)])
+    for i in range(turns):
+        result = agent(f"message {i}")
+    assert len(result["messages"]) == responder.MAX_STORED_MESSAGES
+    assert result["messages"][-1].content == f"r{turns - 1}"   # newest kept, oldest dropped

@@ -1,7 +1,7 @@
 import logging
 import re
 
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage, SystemMessage
 
 from app.agent.state import AgentState
 from app.booking_rules import format_date, format_time, now_local, opening_hours_text, parse_date, parse_time
@@ -93,13 +93,32 @@ def spoken(text: str) -> str:
     text = re.sub(r"^\s*(?:[-*•]|\d+\.)\s+", "", text, flags=re.M)
     return re.sub(r"\s*\n+\s*", " ", text).strip()
 
+# The reply sees only recent messages (booking facts travel separately in booking_data), and the
+# stored conversation is capped, so long chats don't grow slower, costlier and unbounded on disk.
+REPLY_HISTORY = 12
+MAX_STORED_MESSAGES = 40
+
+def recent_messages(messages: list, limit: int = REPLY_HISTORY) -> list:
+    """The last `limit` messages, starting with a customer message (some providers require that)."""
+    recent = messages[-limit:]
+    while recent and not isinstance(recent[0], HumanMessage):
+        recent = recent[1:]
+    return recent
+
+def _with_pruning(state: AgentState, reply: AIMessage) -> AgentState:
+    """Add the reply, removing the oldest stored messages beyond the cap."""
+    messages = state["messages"]
+    excess = len(messages) + 1 - MAX_STORED_MESSAGES
+    removals = [RemoveMessage(id=m.id) for m in messages[:max(0, excess)] if m.id]
+    return {"messages": [*removals, reply]}
+
 def generate_response(state: AgentState) -> AgentState:
     intent = state.get("intent", "FAQ")
 
     # return static response immediately -- no LLM call
     if intent in STATIC_RESPONSES:
         logger.debug("Static reply for %s", intent)
-        return {"messages": [AIMessage(content=STATIC_RESPONSES[intent])]}
+        return _with_pruning(state, AIMessage(content=STATIC_RESPONSES[intent]))
 
     now = now_local()
     parts = [BASE_PROMPT, f"Today is {format_date(now.date())} {now.year}, {format_time(now.time().replace(second=0, microsecond=0))}.",
@@ -109,7 +128,7 @@ def generate_response(state: AgentState) -> AgentState:
     if context := state.get("context"):
         parts.append(f"Relevant business information:\n{context}")
 
-    response = llm.invoke([SystemMessage(content="\n\n".join(parts)), *state["messages"]])
+    response = llm.invoke([SystemMessage(content="\n\n".join(parts)), *recent_messages(state["messages"])])
     reply = spoken(response.text)
     logger.debug("Reply: %s", reply)
-    return {"messages": [AIMessage(content=reply)]}
+    return _with_pruning(state, AIMessage(content=reply))
