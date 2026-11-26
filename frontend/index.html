@@ -91,43 +91,73 @@
     let voiceWs = null;
     let currentAudio = null;   // the agent reply that is playing, if any
 
+    // Reconnect dropped sockets with backoff (1s, 2s, 4s ... 15s). The session id stays the same,
+    // so the conversation continues. Close code 1008 = rejected by the server's policy: don't retry.
+    const POLICY_VIOLATION = 1008;
+    const retryDelay = (attempt) => Math.min(1000 * 2 ** attempt, 15000);
+
     // ── Text WebSocket ──────────────────────────────────────────
-    const textWs = new WebSocket(`${WS_BASE}/ws/${sessionId}`);
+    let textWs = null;
+    let textRetries = 0;
+    let textPending = false;   // a message was sent and its reply hasn't arrived
+    let greeted = false;
     const messagesEl = document.getElementById("messages");
     const inputEl = document.getElementById("input");
     const sendBtn = document.getElementById("send-btn");
     const statusTextEl = document.getElementById("status-text");
 
-    textWs.onopen = () => {
-        statusTextEl.textContent = "Connected";
-        statusTextEl.className = "status connected";
-        inputEl.disabled = false;
-        sendBtn.disabled = false;
-        addMessage("agent", "Hello! Welcome to City Dental Clinic. How can I help you today?");
-    };
-    textWs.onclose = () => {
-        statusTextEl.textContent = "Disconnected";
-        statusTextEl.className = "status disconnected";
-    };
-    textWs.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        removeTyping();
-        if (data.type === "typing") addTyping();
-        else if (data.type === "message" || data.type === "error") {
-            addMessage("agent", data.type === "error" ? data.message : data.reply, data.intent);
-            sendBtn.disabled = false;
-            inputEl.disabled = false;
-        }
-    };
+    function setTextInput(enabled) {
+        inputEl.disabled = !enabled;
+        sendBtn.disabled = !enabled;
+    }
+
+    function connectTextWs() {
+        textWs = new WebSocket(`${WS_BASE}/ws/${sessionId}`);
+        textWs.onopen = () => {
+            textRetries = 0;
+            statusTextEl.textContent = "Connected";
+            statusTextEl.className = "status connected";
+            setTextInput(true);
+            if (!greeted) {
+                addMessage("agent", "Hello! Welcome to City Dental Clinic. How can I help you today?");
+                greeted = true;
+            }
+        };
+        textWs.onclose = (event) => {
+            setTextInput(false);
+            statusTextEl.className = "status disconnected";
+            if (textPending) {
+                removeTyping();
+                addMessage("agent", "The connection dropped before I could reply. Please send that again.");
+                textPending = false;
+            }
+            if (event.code === POLICY_VIOLATION) {
+                statusTextEl.textContent = "Connection refused";
+                return;
+            }
+            statusTextEl.textContent = "Reconnecting...";
+            setTimeout(connectTextWs, retryDelay(textRetries++));
+        };
+        textWs.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            removeTyping();
+            if (data.type === "typing") addTyping();
+            else if (data.type === "message" || data.type === "error") {
+                textPending = false;
+                addMessage("agent", data.type === "error" ? data.message : data.reply, data.intent);
+                setTextInput(true);
+            }
+        };
+    }
 
     function sendMessage() {
         const text = inputEl.value.trim();
-        if (!text) return;
+        if (!text || !textWs || textWs.readyState !== WebSocket.OPEN) return;
         addMessage("user", text);
         textWs.send(JSON.stringify({ message: text }));
+        textPending = true;
         inputEl.value = "";
-        sendBtn.disabled = true;
-        inputEl.disabled = true;
+        setTextInput(false);
     }
 
     function addMessage(role, text, intent = "") {
@@ -157,22 +187,38 @@
     }
 
     inputEl.addEventListener("keydown", e => { if (e.key === "Enter") sendMessage(); });
+    connectTextWs();
 
     // ── Voice WebSocket ─────────────────────────────────────────
+    let voiceRetries = 0;
+    let voicePending = false;   // audio was sent and the reply hasn't finished arriving
+
     function connectVoiceWs() {
         voiceWs = new WebSocket(`${WS_BASE}/ws/voice/${sessionId}`);
         const statusVoiceEl = document.getElementById("status-voice");
         const micBtn = document.getElementById("mic-btn");
 
         voiceWs.onopen = () => {
+            voiceRetries = 0;
             statusVoiceEl.textContent = "Connected";
             statusVoiceEl.className = "status connected";
             micBtn.className = "mic-btn idle";
+            document.getElementById("voice-status").textContent = "Press mic to speak";
         };
-        voiceWs.onclose = () => {
-            statusVoiceEl.textContent = "Disconnected";
+        voiceWs.onclose = (event) => {
             statusVoiceEl.className = "status disconnected";
             micBtn.className = "mic-btn disabled";
+            if (isRecording) stopRecording();   // the mic button is disabled now, so stop it for the user
+            if (voicePending) {
+                document.getElementById("voice-status").textContent = "The connection dropped. Please try again.";
+                voicePending = false;
+            }
+            if (event.code === POLICY_VIOLATION) {
+                statusVoiceEl.textContent = "Connection refused";
+                return;
+            }
+            statusVoiceEl.textContent = "Reconnecting...";
+            setTimeout(connectVoiceWs, retryDelay(voiceRetries++));
         };
         voiceWs.onmessage = (event) => {
             const data = JSON.parse(event.data);
@@ -187,8 +233,10 @@
                 document.getElementById("voice-reply").textContent = data.text;
                 addVoiceLog("Agent: " + data.text);
             } else if (data.type === "audio") {
+                voicePending = false;
                 playAudio(data.data);
             } else if (data.type === "error") {
+                voicePending = false;
                 document.getElementById("voice-status").textContent = data.message;
                 micBtn.className = "mic-btn idle";
             }
@@ -209,7 +257,12 @@
             mediaRecorder.onstop = async () => {
                 const blob = new Blob(audioChunks, { type: "audio/webm" });
                 const arrayBuffer = await blob.arrayBuffer();
+                if (!voiceWs || voiceWs.readyState !== WebSocket.OPEN) {
+                    document.getElementById("voice-status").textContent = "Not connected -- please try again in a moment.";
+                    return;
+                }
                 voiceWs.send(arrayBuffer);
+                voicePending = true;
                 document.getElementById("voice-status").textContent = "Processing...";
                 micBtn.className = "mic-btn disabled";
             };
@@ -219,12 +272,15 @@
             micBtn.textContent = "⏹";
             document.getElementById("voice-status").textContent = "Recording... press to stop";
         } else {
-            // stop recording
-            mediaRecorder.stop();
-            mediaRecorder.stream.getTracks().forEach(t => t.stop());
-            isRecording = false;
-            micBtn.textContent = "🎤";
+            stopRecording();
         }
+    }
+
+    function stopRecording() {
+        mediaRecorder.stop();
+        mediaRecorder.stream.getTracks().forEach(t => t.stop());
+        isRecording = false;
+        document.getElementById("mic-btn").textContent = "🎤";
     }
 
     function playAudio(base64Data) {
