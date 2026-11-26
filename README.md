@@ -9,6 +9,12 @@ details over several turns, saves the booking, and emails the owner.
 Built with **LangGraph**, **FastAPI** (WebSockets), **ChromaDB**, **Deepgram** speech-to-text and
 pluggable LLM / text-to-speech providers. The included demo business is a dental clinic.
 
+![Demo: two questions by text, then booking an appointment by voice](docs/demo.gif)
+
+*A real run of the app at 1.5× speed: two questions by text, then a booking made by voice. The panel
+on the right is driven by the server's actual events and timings; captions stand in for the audio.
+The GIF is generated from code: see [`demo/`](demo/).*
+
 Example flow (the LLM's wording varies from run to run):
 
 ```
@@ -40,6 +46,8 @@ Agent:   You're booked for a cleaning this Friday at 10 AM, Sara. The clinic wil
   connection stays open; the text reply is still delivered when voice fails.
 - **Swappable providers** via `.env`: Groq / Anthropic Claude / OpenAI / Gemini for the LLM;
   Edge TTS (free) / ElevenLabs / OpenAI for speech.
+- **Reproducible demo**: the GIF above is recorded from the real app and rendered by a script
+  (Puppeteer, Whisper, HyperFrames, Remotion).
 - **Tested**: 59 offline unit tests (fake LLMs, no API keys) and a Docker build in GitHub Actions CI.
 
 ## Architecture

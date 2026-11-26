@@ -1,0 +1,6 @@
+node_modules/
+out/
+# HyperFrames local editor state
+intro/.hyperframes/
+# the caller clips are inputs (the repo root ignores *.mp3)
+!assets/*.mp3

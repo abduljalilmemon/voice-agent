@@ -33,3 +33,7 @@ README.md
 scripts/
 pyproject.toml
 requirements-dev.txt
+
+# demo video tooling (Node) and docs media
+demo/
+docs/
