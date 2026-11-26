@@ -4,6 +4,7 @@ from functools import lru_cache
 import chromadb
 from chromadb.utils.embedding_functions import ONNXMiniLM_L6_V2
 
+from app.booking_rules import opening_hours_text
 from app.config import BIZ_CONFIG
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,7 @@ def business_profile_chunk() -> str:
     """Core facts live in business_config.json (single source of truth); index them too."""
     c = BIZ_CONFIG
     return (f"CONTACT AND LOCATION: {c['business_name']} is located at {c['address']}. "
-            f"Phone: {c['phone']}. Email: {c['email']}. Opening hours: {c['hours']}")
+            f"Phone: {c['phone']}. Email: {c['email']}. Opening hours: {opening_hours_text()}")
 
 def ingest_file(filepath: str):
     with open(filepath, "r", encoding="utf-8") as f:

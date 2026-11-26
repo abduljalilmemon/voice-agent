@@ -69,7 +69,8 @@ def run_turn(session_id: str, text: str) -> dict:
             "intent": "",
             "context": "",
             "session_id": session_id,
-            "new_booking_id": None
+            "new_booking_id": None,
+            "booking_issue": None
         },
         config={"configurable": {"thread_id": session_id}}
     )

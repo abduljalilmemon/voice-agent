@@ -2,6 +2,7 @@
 
 # config
 python-dotenv==1.2.2
+dateparser==1.5.1  # resolves spoken dates ("this Friday") -- LLMs get weekday arithmetic wrong
 tzdata==2026.6  # IANA timezones for zoneinfo (Windows has none built in)
 
 # agent + LLM providers

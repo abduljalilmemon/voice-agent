@@ -66,7 +66,7 @@ def test_no_booking_guidance_outside_a_booking(monkeypatch):
 
 
 def test_reply_knows_the_booking_was_saved_on_the_same_turn(fake_llms, saved_bookings, agent):
-    fakes = fake_llms(turns=[understood("BOOK", name="Sara", date="Friday", time="10am", phone="0300")],
+    fakes = fake_llms(turns=[understood("BOOK", name="Sara", date="2026-11-27", time="10:00", phone="03001234567")],
                       replies=["ok"])
     agent("book Sara for Friday 10am, phone 0300")
     # understanding + save run before the reply, so the reply prompt already knows

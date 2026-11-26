@@ -1,11 +1,10 @@
 import logging
 import re
-from datetime import datetime
-from zoneinfo import ZoneInfo
 
 from langchain_core.messages import AIMessage, SystemMessage
 
 from app.agent.state import AgentState
+from app.booking_rules import format_date, format_time, now_local, opening_hours_text, parse_date, parse_time
 from app.config import BIZ_CONFIG
 from app.llm import get_llm
 
@@ -15,6 +14,7 @@ llm = get_llm()
 
 NAME = BIZ_CONFIG["business_name"]
 PHONE = BIZ_CONFIG["phone"]
+HOURS = opening_hours_text()
 
 BASE_PROMPT = f"""You are the voice assistant for {NAME}, a {BIZ_CONFIG["business_type"]}. You answer customer calls and chats.
 
@@ -22,7 +22,7 @@ Business details:
 - Address: {BIZ_CONFIG["address"]}
 - Phone: {PHONE}
 - Email: {BIZ_CONFIG["email"]}
-- Hours: {BIZ_CONFIG["hours"]}
+- Hours: {HOURS} Appointments last {BIZ_CONFIG["appointment_minutes"]} minutes.
 
 Your replies are spoken aloud by text-to-speech:
 - 1 to 3 short sentences of plain, natural conversation.
@@ -44,18 +44,29 @@ INTENT_GUIDANCE = {
 STATIC_RESPONSES = {
     "OUT_OF_SCOPE": f"I can only help with questions about {NAME}, like our services, prices, opening hours or appointments. What can I help you with?",
     # no live transfer exists, so be honest and give a way to reach a person
-    "ESCALATE": f"I can't transfer you from here, but you can reach our team directly on {PHONE}, {BIZ_CONFIG['hours']} Is there anything I can help with in the meantime?",
+    "ESCALATE": f"I can't transfer you from here, but you can reach our team directly on {PHONE}. {HOURS} Is there anything I can help with in the meantime?",
 }
 
 # asked in this order, one at a time
 BOOKING_FIELDS = [("name", "their full name"), ("date", "the preferred date"),
                   ("time", "the preferred time"), ("phone", "a phone number")]
 
+def _readable(field: str, value: str) -> str:
+    """Stored as ISO (unambiguous); said as "Friday 27 November" / "10 AM"."""
+    if field == "date" and (d := parse_date(value)):
+        return format_date(d)
+    if field == "time" and (t := parse_time(value)):
+        return format_time(t)
+    return value
+
 def booking_guidance(state: AgentState) -> str:
     """Tell the model the real booking state, so it never has to guess whether it's booked."""
     data = state.get("booking_data") or {}
-    summary = ", ".join(f"{field}: {data[field]}" for field in ("name", "service", "date", "time", "phone")
-                        if data.get(field))
+    summary = ", ".join(f"{field}: {_readable(field, data[field])}"
+                        for field in ("name", "service", "date", "time", "phone") if data.get(field))
+    issue = state.get("booking_issue")
+    problem = (f"The customer's last request couldn't be used: {issue} Tell them briefly and kindly, "
+               f"then ask for an alternative. " if issue else "")
 
     if state.get("new_booking_id"):
         return (f"The appointment request has just been saved ({summary}). Confirm the details back to "
@@ -71,9 +82,9 @@ def booking_guidance(state: AgentState) -> str:
         missing.remove("the preferred time")
         missing[missing.index("the preferred date")] = "the preferred date and time"
     if not missing:
-        return ""
+        return problem
     collected = f"Collected so far: {summary}. " if summary else ""
-    return (f"Booking in progress. {collected}Ask only for the next missing item: {missing[0]}. "
+    return (f"Booking in progress. {problem}{collected}Ask only for the next missing item: {missing[0]}. "
             f"The appointment is NOT booked yet, so never say it is confirmed or booked.")
 
 def spoken(text: str) -> str:
@@ -90,8 +101,9 @@ def generate_response(state: AgentState) -> AgentState:
         logger.debug("Static reply for %s", intent)
         return {"messages": [AIMessage(content=STATIC_RESPONSES[intent])]}
 
-    today = datetime.now(ZoneInfo(BIZ_CONFIG["timezone"])).strftime("%A %d %B %Y")
-    parts = [BASE_PROMPT, f"Today is {today}.", INTENT_GUIDANCE.get(intent, INTENT_GUIDANCE["FAQ"])]
+    now = now_local()
+    parts = [BASE_PROMPT, f"Today is {format_date(now.date())} {now.year}, {format_time(now.time().replace(second=0, microsecond=0))}.",
+             INTENT_GUIDANCE.get(intent, INTENT_GUIDANCE["FAQ"])]
     if guidance := booking_guidance(state):
         parts.append(guidance)
     if context := state.get("context"):

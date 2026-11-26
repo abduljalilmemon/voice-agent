@@ -1,6 +1,7 @@
 """Shared fixtures. Tests run offline: fake LLMs, temp storage, no real email or API keys."""
 import os
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 # ── Environment -- must be set before anything imports `app` ───
@@ -23,6 +24,21 @@ from langchain_core.messages import AIMessage, HumanMessage  # noqa: E402
 from langgraph.checkpoint.memory import MemorySaver  # noqa: E402
 
 from tests.fakes import FakeLLM  # noqa: E402
+
+# every test runs at the same moment: Thursday 26 November 2026, 2 PM at the clinic
+NOW = datetime(2026, 11, 26, 14, 0)
+
+
+@pytest.fixture(autouse=True)
+def frozen_clock_and_fresh_bookings(monkeypatch, tmp_path):
+    """Date rules depend on "now", and slot checks on existing bookings: pin both per test."""
+    import app.agent.nodes.responder as responder_node
+    import app.agent.nodes.understand as understand_node
+    import app.integrations.booking_store as booking_store
+
+    monkeypatch.setattr(understand_node, "now_local", lambda: NOW)
+    monkeypatch.setattr(responder_node, "now_local", lambda: NOW)
+    monkeypatch.setattr(booking_store, "DB_PATH", str(tmp_path / "bookings.db"))
 
 
 @pytest.fixture
@@ -68,7 +84,7 @@ def agent(monkeypatch):
     def turn(text, session_id="test-session"):
         return graph.invoke(
             {"messages": [HumanMessage(content=text)], "intent": "", "context": "",
-             "session_id": session_id, "new_booking_id": None},
+             "session_id": session_id, "new_booking_id": None, "booking_issue": None},
             config={"configurable": {"thread_id": session_id}},
         )
 

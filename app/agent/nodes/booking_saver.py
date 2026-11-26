@@ -18,6 +18,10 @@ def save_completed_booking(state: AgentState) -> AgentState:
         BIZ_CONFIG["business_name"],
         booking_data
     )
+    if booking_id is None:  # someone else took this slot a moment ago
+        rest = {k: v for k, v in booking_data.items() if k not in ("date", "time")}
+        return {"booking_data": {**rest, "complete": False},
+                "booking_issue": "Sorry, someone just booked that time."}
     send_booking_email(
         booking_data,
         BIZ_CONFIG["business_name"],

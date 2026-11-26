@@ -114,7 +114,7 @@ def run_turn(agent, session, text, attempts=4):
     usage = UsageCounter()
     config = {"configurable": {"thread_id": session}, "callbacks": [usage]}
     payload = {"messages": [HumanMessage(content=text)], "intent": "", "context": "",
-               "session_id": session, "new_booking_id": None}
+               "session_id": session, "new_booking_id": None, "booking_issue": None}
     for attempt in range(attempts):
         try:
             started = time.perf_counter()

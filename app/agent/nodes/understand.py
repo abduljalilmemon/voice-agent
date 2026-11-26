@@ -6,7 +6,18 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
 from app.agent.state import AgentState
+from app.booking_rules import (
+    day_problem,
+    normalize_phone,
+    now_local,
+    parse_date,
+    parse_time,
+    resolve_date,
+    slot_problem,
+    valid_email,
+)
 from app.config import BIZ_CONFIG
+from app.integrations.booking_store import is_slot_taken
 from app.llm import get_llm
 
 logger = logging.getLogger(__name__)
@@ -55,15 +66,16 @@ progress and the answer gives a booking detail. A business question asked in the
 booking is still FAQ.
 
 2. booking -- booking details given in the LATEST message only; null for anything not in it.
-Keep dates and times as the customer said them. If they correct an earlier detail, give the new value.
+date: the day exactly as the customer said it ("this Friday", "tomorrow", "the 2nd of December"); do not convert it.
+time: 24-hour HH:MM ("10am" = 10:00, "3:30pm" = 15:30). If they correct an earlier detail, give the new value.
 
 Examples (agent's last message | latest user message => result):
 (start) | "hi there" => GREETING
 (start) | "what are your hours?" => FAQ
 (start) | "i want to book a cleaning" => BOOK, service=cleaning
-(start) | "book me in for Friday at 10, I'm Sara Khan" => BOOK, name=Sara Khan, date=Friday, time=10
+(start) | "book me in for Friday at 10, I'm Sara Khan" => BOOK, name=Sara Khan, date=Friday, time=10:00
 "Could I get your full name?" | "Abdul Jalil" => COLLECT, name=Abdul Jalil
-"What date and time works for you?" | "tomorrow at 3pm" => COLLECT, date=tomorrow, time=3pm
+"What date and time works for you?" | "tomorrow at 3pm" => COLLECT, date=tomorrow, time=15:00
 "Could I get your phone number?" | "03477733113" => COLLECT, phone=03477733113
 "Shall I go ahead and book that?" | "yes" => COLLECT
 "Is there anything else I can help you with?" | "no that's it, thanks" => GREETING
@@ -83,30 +95,76 @@ def _booking_status(state: AgentState) -> str:
     known = ", ".join(f"{f}={data[f]}" for f in ("name", "service", "date", "time", "phone", "email") if data.get(f))
     return f"A booking is in progress. Collected so far: {known}."
 
-def _format_input(state: AgentState) -> str:
+def _format_input(state: AgentState, now) -> str:
     *previous, latest = state["messages"]
     history = [f"{_speaker(m)}: {m.content}" for m in previous[-HISTORY_WINDOW:]]
-    parts = ["Recent conversation:\n" + ("\n".join(history) if history else "(start of conversation)")]
+    parts = [f"Today is {now:%A %Y-%m-%d}, {now:%H:%M} at the clinic.",
+             "Recent conversation:\n" + ("\n".join(history) if history else "(start of conversation)")]
     if status := _booking_status(state):
         parts.append(status)
     parts.append(f"Latest user message: {latest.content}")
     return "\n\n".join(parts)
 
+def _apply_details(previous: dict, given: dict, now) -> tuple[dict, str | None]:
+    """Merge newly given details into the booking, keeping only valid, bookable ones.
+
+    Returns the booking and, if something was rejected, a short reason the reply can pass on.
+    """
+    data, issue = dict(previous), None
+    for field, value in given.items():
+        if field == "phone":
+            if not (value := normalize_phone(value)):
+                issue = "That doesn't sound like a complete phone number."
+                continue
+        elif field == "email" and not valid_email(value):
+            issue = "That email address doesn't look right."
+            continue
+        elif field == "date":
+            if not (day := resolve_date(value, now)):  # "this Friday" -> a real date, in code
+                issue = "I didn't catch the date."
+                continue
+            value = day.isoformat()
+        elif field == "time":
+            if not (at := parse_time(value)):
+                issue = "I didn't catch the time."
+                continue
+            value = at.strftime("%H:%M")
+        data[field] = value
+
+    # check the day / slot as soon as enough of it is known
+    day, at = parse_date(data.get("date")), parse_time(data.get("time"))
+    problem = None
+    if day and at:
+        problem = slot_problem(day, at, now)
+        if not problem and is_slot_taken(day.isoformat(), at.strftime("%H:%M")):
+            problem = "That time is already booked."
+    elif day:
+        problem = day_problem(day, now)
+    if problem:
+        issue = problem
+        just_given = {"date", "time"} & given.keys()
+        for field in just_given or {"date", "time"}:  # nothing new? the old slot became invalid
+            data.pop(field, None)
+
+    data["complete"] = all(data.get(field) for field in REQUIRED_FIELDS)
+    return data, issue
+
 def understand(state: AgentState) -> AgentState:
+    now = now_local()
     result: TurnUnderstanding = llm.invoke([
         SystemMessage(content=UNDERSTAND_PROMPT),
-        HumanMessage(content=_format_input(state)),
+        HumanMessage(content=_format_input(state, now)),
     ])
     update: AgentState = {"intent": result.intent}
     logger.info("Intent: %s", result.intent)
 
     # booking details only count on booking turns, and never change a booking that's already saved
     if result.intent in {"BOOK", "COLLECT"} and not state.get("booking_id"):
-        new_details = {k: v.strip() for k, v in result.booking.model_dump().items()
-                       if isinstance(v, str) and v.strip() and v.strip().lower() != "null"}
-        data = {**(state.get("booking_data") or {}), **new_details}
-        data["complete"] = all(data.get(field) for field in REQUIRED_FIELDS)
+        given = {k: v.strip() for k, v in result.booking.model_dump().items()
+                 if isinstance(v, str) and v.strip() and v.strip().lower() != "null"}
+        data, issue = _apply_details(state.get("booking_data") or {}, given, now)
         update["booking_data"] = data
-        logger.info("Booking: complete=%s", data["complete"])
+        update["booking_issue"] = issue
+        logger.info("Booking: complete=%s%s", data["complete"], f" (rejected: {issue})" if issue else "")
         logger.debug("Booking data: %s", data)
     return update

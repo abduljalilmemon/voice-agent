@@ -77,7 +77,8 @@ flowchart LR
 |---|---|
 | Understand | One structured-output LLM call (validated against a Pydantic schema) that labels the latest message (`GREETING`, `FAQ`, `BOOK`, `COLLECT`, `COMPLAINT`, `ESCALATE`, `CONVERSATION`, `OUT_OF_SCOPE`) and pulls out any booking details in it. It sees the last few messages and what's been collected so far, so short answers like "yes" or "Sara Khan" are read in context. New details are merged into the booking in code (a correction overrides the old value), and completeness (name, date, time, phone) is decided in code, not by the LLM. |
 | Knowledge retriever | Embeds the question (all-MiniLM-L6-v2 via ONNX Runtime) and keeps only chunks within a calibrated distance cut-off, so off-topic questions get no misleading context. |
-| Booking saver | Saves the booking once per conversation and emails the owner. |
+| Booking rules | Plain code, not the LLM: spoken dates ("this Friday", "the 14th") are resolved with `dateparser`, then checked against opening hours, appointment length and existing bookings; phone and email are validated. A rejected detail is dropped and the reply is told why ("we're closed on Sundays"). |
+| Booking saver | Saves the booking once per conversation, re-checking the slot in the same database transaction so two callers can't take it at once, and emails the owner. |
 | Reply generator | One prompt with the business profile, today's date, voice rules and the real booking state. Markdown is stripped before speech. Off-topic and escalation replies are fixed text, with no LLM call. |
 
 ## Results
@@ -158,7 +159,8 @@ All settings live in `.env`; [`.env.example`](.env.example) lists every one. The
 ### Using it for another business
 
 1. Edit [`data/business_config.json`](data/business_config.json) with the business name, type,
-   address, phone, email, hours and timezone. These go into every reply and are also searchable.
+   address, phone, email, timezone, appointment length and opening hours per weekday (`null` for
+   closed days). These go into every reply, are searchable, and decide which slots can be booked.
 2. Replace [`data/knowledge_base/dental_clinic.txt`](data/knowledge_base/dental_clinic.txt) with the
    business's services, prices, policies and FAQs, as paragraphs separated by blank lines.
 3. Re-run `python -m app.knowledge.ingest` (Docker does this on start).
@@ -219,8 +221,9 @@ These are known gaps, listed here rather than hidden:
 
 - **Voice is push-to-talk and not streamed**: the whole recording is transcribed, then the whole
   reply is synthesised, which is why a turn takes several seconds.
-- **Dates are stored as spoken** ("this Friday"), not converted to calendar dates, and availability
-  isn't checked. Each conversation can make one booking, and it can't be changed in the chat.
+- **Bookings are checked against opening hours and each other, not a real calendar**: each
+  conversation can make one booking, and it can't be changed in the chat. Rare date phrasings
+  ("next week Tuesday") aren't understood; the agent then asks for the date again.
 - **Single-instance storage**: SQLite and the in-memory rate limiter work for one server process.
   Behind a reverse proxy, the rate limiter would need the real client IP from proxy headers.
 - **Groq free tier**: a turn uses about 1,400 tokens over two LLM calls, and the free tier allows
@@ -230,7 +233,6 @@ These are known gaps, listed here rather than hidden:
 ## Roadmap
 
 - [ ] Streaming speech-to-text and text-to-speech, with interruption and no push-to-talk
-- [ ] Convert spoken dates to real dates and check availability
 - [ ] Google Calendar integration for real appointment slots
 - [ ] Twilio integration for real phone calls
 - [ ] Per-stage latency metrics

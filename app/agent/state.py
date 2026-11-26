@@ -11,3 +11,4 @@ class AgentState(TypedDict):
     booking_data: dict # booking info like name, date, time etc. (persists across turns)
     booking_id: int | None # set once the booking is saved -- guards against duplicate saves
     new_booking_id: int | None # set only on the turn the booking was saved (reset every turn)
+    booking_issue: str | None # why a requested detail was rejected this turn, e.g. closed that day (reset every turn)
