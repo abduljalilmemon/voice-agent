@@ -1,7 +1,12 @@
 // Records the REAL app: drives frontend/index.html in Chrome against a running server and saves
-//   out/capture.webm   screen recording of the page
+//   out/frames/*.jpg   screen frames from Chrome's screencast, each with the real time it was drawn
+//   out/frames.json    when each frame appeared (ms since the recording started)
 //   out/events.json    every server event with its time (ms since the recording started)
 //   out/agent-N.mp3    the agent's spoken replies (for Whisper captions)
+//
+// Frames and events share one clock, so the video and the event-driven panel stay in sync.
+// (Puppeteer's page.screencast() writes a fixed frame rate from frames that only arrive on change,
+// which drifted ~14% behind real time.)
 //
 // Headless Chrome has no microphone, so getUserMedia is replaced with a stream that plays a
 // pre-recorded caller clip. Everything after the mic -- the app's MediaRecorder, the WebSocket,
@@ -19,8 +24,12 @@ const VIEWPORT = {width: 520, height: 760};
 fs.mkdirSync(OUT, {recursive: true});
 // remove the previous capture's files: stale agent audio would give stale captions
 for (const f of fs.readdirSync(OUT)) {
-  if (/^(capture.(webm|mp4)|events.json|captions.json|agent-d+.(mp3|json)|caller-d+.json)$/.test(f)) fs.rmSync(path.join(OUT, f));
+  if (/^(capture\.(webm|mp4)|frames\.(txt|json)|events\.json|captions\.json|agent-\d+\.(mp3|json)|caller-\d+\.json)$/.test(f)) {
+    fs.rmSync(path.join(OUT, f));
+  }
 }
+fs.rmSync(path.join(OUT, 'frames'), {recursive: true, force: true});
+fs.mkdirSync(path.join(OUT, 'frames'));
 
 const clip = (file) => 'data:audio/mpeg;base64,' + fs.readFileSync(path.resolve('assets', file)).toString('base64');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -108,8 +117,15 @@ async function askByVoice(clipFile, seconds) {
 await page.goto(`${BASE}/static/index.html`, {waitUntil: 'networkidle0'});
 await page.waitForFunction(() => document.querySelector('#status-text').textContent === 'Connected');
 
-const recorder = await page.screencast({path: path.join(OUT, 'capture.webm')});
+// Chrome sends a frame whenever the page changes, stamped with the time it was drawn (epoch seconds)
+const frames = [];
+const cdp = await page.createCDPSession();
+cdp.on('Page.screencastFrame', ({data, metadata, sessionId}) => {
+  frames.push({chromeT: metadata.timestamp * 1000, receivedAt: Date.now(), data});
+  cdp.send('Page.screencastFrameAck', {sessionId}).catch(() => {});
+});
 recordingStartedAt = Date.now();
+await cdp.send('Page.startScreencast', {format: 'jpeg', quality: 92});
 await sleep(1500);
 
 await askByText('What are your opening hours?');
@@ -122,8 +138,23 @@ await askByVoice('caller-1.mp3', 6.0);
 await askByVoice('caller-2.mp3', 5.1);
 await sleep(1000);
 
-await recorder.stop();
-const durationMs = Date.now() - recordingStartedAt;
+const stoppedAt = Date.now();
+await cdp.send('Page.stopScreencast');
+const durationMs = stoppedAt - recordingStartedAt;
+
+// Chrome's frame clock isn't Node's Date.now() (it ran ~2.7s ahead). Keep Chrome's spacing between
+// frames, and map it onto Node's clock using the smallest (stamp -> received) gap: offset + min delay.
+const offset = Math.min(...frames.map((f) => f.chromeT - f.receivedAt));
+for (const f of frames) f.t = f.chromeT - offset;
+
+// raw frames + the time each appeared (ms since the recording started); render.mjs resamples them
+const frameTimes = frames.map((f, i) => {
+  const file = `frames/${String(i).padStart(5, '0')}.jpg`;
+  fs.writeFileSync(path.join(OUT, file), Buffer.from(f.data, 'base64'));
+  return {file, t: Math.max(0, f.t - recordingStartedAt)};
+});
+fs.writeFileSync(path.join(OUT, 'frames.json'), JSON.stringify(frameTimes));
+console.log(`${frames.length} frames`);
 fs.writeFileSync(path.join(OUT, 'events.json'), JSON.stringify({durationMs, viewport: VIEWPORT, events}, null, 2));
 await browser.close();
 
