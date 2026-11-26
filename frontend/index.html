@@ -89,6 +89,7 @@
     let audioChunks = [];
     let isRecording = false;
     let voiceWs = null;
+    let currentAudio = null;   // the agent reply that is playing, if any
 
     // ── Text WebSocket ──────────────────────────────────────────
     const textWs = new WebSocket(`${WS_BASE}/ws/${sessionId}`);
@@ -182,10 +183,9 @@
                 document.getElementById("voice-transcript").textContent = data.text;
                 addVoiceLog("You: " + data.text);
             } else if (data.type === "reply") {
+                // the spoken version follows; the mic re-enables when it arrives (or on error)
                 document.getElementById("voice-reply").textContent = data.text;
                 addVoiceLog("Agent: " + data.text);
-                micBtn.className = "mic-btn idle";
-                document.getElementById("voice-status").textContent = "Press mic to speak";
             } else if (data.type === "audio") {
                 playAudio(data.data);
             } else if (data.type === "error") {
@@ -200,7 +200,8 @@
         if (micBtn.classList.contains("disabled")) return;
 
         if (!isRecording) {
-            // start recording
+            // start recording -- barge-in: stop the agent so its voice isn't recorded
+            stopSpeaking();
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
             audioChunks = [];
@@ -233,8 +234,27 @@
         const blob = new Blob([bytes], { type: "audio/mp3" });
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
-        audio.play();
-        audio.onended = () => URL.revokeObjectURL(url);
+        currentAudio = audio;
+
+        const finished = () => {
+            URL.revokeObjectURL(url);
+            if (currentAudio === audio) {   // not interrupted by a new recording
+                currentAudio = null;
+                document.getElementById("voice-status").textContent = "Press mic to speak";
+            }
+        };
+        audio.onended = finished;
+
+        document.getElementById("mic-btn").className = "mic-btn idle";
+        document.getElementById("voice-status").textContent = "Speaking... (press mic to interrupt)";
+        audio.play().catch(finished);       // e.g. autoplay blocked: don't stay on "Speaking"
+    }
+
+    function stopSpeaking() {
+        if (currentAudio) {
+            currentAudio.pause();
+            currentAudio = null;
+        }
     }
 
     function addVoiceLog(text) {
