@@ -43,12 +43,16 @@ Agent:   You're booked for a cleaning this Friday at 10 AM, Sara. The clinic wil
 - **Hardened API**: admin auth, WebSocket origin checks, per-IP rate limiting, input size limits,
   HTML-escaped notification emails.
 - **Fails gracefully**: speech-to-text, LLM and TTS failures reach the caller as a message and the
-  connection stays open; the text reply is still delivered when voice fails.
+  connection stays open; the text reply is still delivered when voice fails. Provider rate limits
+  are retried, and the browser reconnects on its own if the connection drops.
+- **Bookings checked in code**: spoken dates are resolved to real dates, then checked against
+  opening hours and existing bookings (no double-booking, even for simultaneous callers).
 - **Swappable providers** via `.env`: Groq / Anthropic Claude / OpenAI / Gemini for the LLM;
   Edge TTS (free) / ElevenLabs / OpenAI for speech.
 - **Reproducible demo**: the GIF above is recorded from the real app and rendered by a script
   (Puppeteer, Whisper, HyperFrames, Remotion).
-- **Tested**: 59 offline unit tests (fake LLMs, no API keys) and a Docker build in GitHub Actions CI.
+- **Tested**: 108 offline unit tests (fake LLMs, a frozen clock, no API keys) and a Docker build in
+  GitHub Actions CI.
 
 ## Architecture
 
@@ -187,7 +191,7 @@ curl localhost:8000/bookings -H "X-API-Key: $ADMIN_API_KEY"
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                 # 59 tests, offline: fake LLMs, temp storage, no API keys or email
+pytest                 # 108 tests, offline: fake LLMs, temp storage, no API keys or email
 ruff check .
 
 # evals call the real LLM configured in .env and use API credits
