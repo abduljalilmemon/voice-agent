@@ -52,4 +52,13 @@ def get_llm(temperature: float = 0.7, schema: type[BaseModel] | None = None, rea
         retry_on += (BadRequestError,)
     if retry_on:
         llm = llm.with_retry(retry_if_exception_type=retry_on, stop_after_attempt=3, wait_exponential_jitter=False)
+    if provider == "groq":
+        from groq import RateLimitError
+        # free-tier limits are per minute: back off briefly before giving up (~1s, then ~2-4s)
+        llm = llm.with_retry(retry_if_exception_type=(RateLimitError,), stop_after_attempt=3,
+                             exponential_jitter_params={"initial": 1, "max": 6})
     return llm
+
+def is_rate_limited(error: BaseException) -> bool:
+    """True for a provider's "too many requests" error (Groq, Anthropic and OpenAI all name it so)."""
+    return type(error).__name__ == "RateLimitError"

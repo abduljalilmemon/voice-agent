@@ -158,3 +158,80 @@ def test_logging_emoji_to_a_legacy_encoded_stream_does_not_crash():
         assert b"Hi there! \\U0001f44b" in raw.getvalue()
     finally:
         setup_logging()  # restore the normal handler for other tests
+
+
+# ── One turn at a time per conversation ────────────────────────
+
+def _concurrency_probe(monkeypatch):
+    import threading
+    import time
+
+    state = {"running": {}, "peak": {}}
+    guard = threading.Lock()
+
+    def slow_turn(session_id, text):
+        with guard:
+            state["running"][session_id] = state["running"].get(session_id, 0) + 1
+            total = sum(state["running"].values())
+            state["peak"][session_id] = max(state["peak"].get(session_id, 0), state["running"][session_id])
+            state["peak"]["all"] = max(state["peak"].get("all", 0), total)
+        time.sleep(0.2)
+        with guard:
+            state["running"][session_id] -= 1
+        return {}
+
+    monkeypatch.setattr(main, "_invoke_agent", slow_turn)
+    return state
+
+
+def _run_together(calls):
+    import threading
+
+    threads = [threading.Thread(target=main.run_turn, args=args) for args in calls]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+
+def test_turns_for_the_same_session_never_overlap(monkeypatch):
+    state = _concurrency_probe(monkeypatch)
+    _run_together([("same", "a"), ("same", "b"), ("same", "c")])
+    assert state["peak"]["same"] == 1
+
+
+def test_different_sessions_still_run_in_parallel(monkeypatch):
+    state = _concurrency_probe(monkeypatch)
+    _run_together([("caller-1", "a"), ("caller-2", "b")])
+    assert state["peak"]["all"] == 2
+
+
+# ── Provider rate limits ───────────────────────────────────────
+
+class RateLimitError(Exception):
+    """Named like Groq's / Anthropic's / OpenAI's 429 errors."""
+
+
+def _rate_limited(*args, **kwargs):
+    raise RateLimitError("429 Too Many Requests")
+
+
+def test_rate_limit_gives_a_busy_message_over_rest(client, monkeypatch):
+    monkeypatch.setattr(main, "run_turn", _rate_limited)
+    response = client.post("/chat", json={"message": "hi"})
+    assert response.status_code == 503 and "a lot of requests" in response.json()["detail"]
+
+
+def test_rate_limit_gives_a_busy_message_over_websocket(client, monkeypatch):
+    monkeypatch.setattr(main, "run_turn", _rate_limited)
+    with client.websocket_connect("/ws/s1") as ws:
+        ws.send_text(json.dumps({"message": "hi"}))
+        assert "a lot of requests" in next_of_type(ws, "message")["message"]
+
+
+def test_groq_calls_retry_rate_limits():
+    from groq import RateLimitError as GroqRateLimitError
+
+    from app.llm import get_llm
+
+    assert GroqRateLimitError in get_llm().retry_exception_types

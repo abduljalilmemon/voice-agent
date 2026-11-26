@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import logging
+import threading
 import uuid
 from contextlib import asynccontextmanager
 
@@ -14,6 +15,7 @@ from pydantic import BaseModel, Field
 from app.agent.graph import agent
 from app.config import BIZ_CONFIG
 from app.integrations.booking_store import get_all_bookings
+from app.llm import is_rate_limited
 from app.logging_setup import setup_logging
 from app.security import (
     ALLOWED_ORIGINS,
@@ -57,12 +59,28 @@ app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
 # ── Helper ─────────────────────────────────────────────────────
 
+# One turn at a time per conversation: two tabs on the same session would otherwise run turns
+# concurrently and overwrite each other's checkpoint. Different sessions still run in parallel.
+_session_locks: dict[str, threading.Lock] = {}
+_session_locks_guard = threading.Lock()
+
+def _session_lock(session_id: str) -> threading.Lock:
+    with _session_locks_guard:
+        if len(_session_locks) > 10_000:  # forget idle sessions
+            for sid in [sid for sid, lock in _session_locks.items() if not lock.locked()]:
+                del _session_locks[sid]
+        return _session_locks.setdefault(session_id, threading.Lock())
+
 def run_turn(session_id: str, text: str) -> dict:
     """Run one conversation turn through the agent (blocking -- call via asyncio.to_thread).
 
     Only per-turn fields are passed in. Persistent fields (booking_data, booking_id)
     are left out so the checkpointer keeps them between turns.
     """
+    with _session_lock(session_id):
+        return _invoke_agent(session_id, text)
+
+def _invoke_agent(session_id: str, text: str) -> dict:
     return agent.invoke(
         {
             "messages": [HumanMessage(content=text)],
@@ -77,6 +95,10 @@ def run_turn(session_id: str, text: str) -> dict:
 
 RATE_LIMITED = "You're sending messages too quickly. Please wait a moment and try again."
 AGENT_UNAVAILABLE = "Sorry, the assistant is temporarily unavailable. Please try again in a moment."
+AGENT_BUSY = "We're getting a lot of requests right now. Please try again in a minute."
+
+def turn_failed_message(error: BaseException) -> str:
+    return AGENT_BUSY if is_rate_limited(error) else AGENT_UNAVAILABLE
 
 async def accept_if_allowed(websocket: WebSocket, session_id: str) -> bool:
     """Reject cross-site browser connections and malformed session ids before accepting."""
@@ -131,9 +153,9 @@ def chat(payload: ChatRequest, request: Request):
     message, session_id = payload.message, payload.session_id
     try:
         result = run_turn(session_id, message)
-    except Exception:
+    except Exception as error:
         logger.exception("Agent turn failed (session %s)", session_id[:8])
-        raise HTTPException(status_code=503, detail=AGENT_UNAVAILABLE) from None
+        raise HTTPException(status_code=503, detail=turn_failed_message(error)) from None
 
     reply = result["messages"][-1].content
     booking_id = result.get("new_booking_id")
@@ -181,9 +203,9 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
             try:
                 result = await asyncio.to_thread(run_turn, session_id, message)
-            except Exception:
+            except Exception as error:
                 logger.exception("Agent turn failed (session %s)", session_id[:8])
-                await send_error(websocket, AGENT_UNAVAILABLE)
+                await send_error(websocket, turn_failed_message(error))
                 continue
 
             reply = result["messages"][-1].content
@@ -251,9 +273,9 @@ async def voice_websocket_endpoint(websocket: WebSocket, session_id: str):
 
             try:
                 result = await asyncio.to_thread(run_turn, session_id, transcript)
-            except Exception:
+            except Exception as error:
                 logger.exception("Agent turn failed (session %s)", session_id[:8])
-                await send_error(websocket, AGENT_UNAVAILABLE)
+                await send_error(websocket, turn_failed_message(error))
                 continue
 
             reply = result["messages"][-1].content
