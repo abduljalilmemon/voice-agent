@@ -12,8 +12,8 @@ def smtp(monkeypatch):
     sent = {}
 
     class FakeSMTP:
-        def __init__(self, *args):
-            pass
+        def __init__(self, *args, **kwargs):
+            sent["connect_kwargs"] = kwargs
 
         def __enter__(self):
             return self
@@ -66,10 +66,26 @@ def test_newline_in_name_cannot_inject_headers(smtp):
 
 def test_skipped_without_owner_email(smtp):
     assert notifications.send_booking_email({"name": "Sara"}, "City Dental", None) is False
-    assert smtp == {}
+    assert "to" not in smtp  # nothing was sent
 
 
 def test_skipped_without_gmail_credentials(smtp, monkeypatch):
     monkeypatch.setenv("GMAIL_USER", "")
     assert notifications.send_booking_email({"name": "Sara"}, "City Dental", "owner@example.com") is False
-    assert smtp == {}
+    assert "to" not in smtp  # nothing was sent
+
+
+def test_mail_server_connection_has_a_timeout(smtp):
+    notifications.send_booking_email({"name": "Sara"}, "City Dental", "owner@example.com")
+    assert smtp["connect_kwargs"]["timeout"] == notifications.SMTP_TIMEOUT_SECONDS
+
+
+def test_unresponsive_mail_server_fails_cleanly(monkeypatch):
+    def times_out(*args, **kwargs):
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(notifications.smtplib, "SMTP_SSL", times_out)
+    monkeypatch.setenv("GMAIL_USER", "agent@example.com")
+    monkeypatch.setenv("GMAIL_APP_PASSWORD", "app-password")
+    # returns False instead of raising, so the booking itself still succeeds
+    assert notifications.send_booking_email({"name": "Sara"}, "City Dental", "owner@example.com") is False

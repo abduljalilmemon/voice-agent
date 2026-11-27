@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
+SMTP_TIMEOUT_SECONDS = 10
+
 load_dotenv()
 
 def send_booking_email(booking_data: dict, business_name: str, owner_email: str) -> bool:
@@ -96,7 +98,9 @@ def send_booking_email(booking_data: dict, business_name: str, owner_email: str)
     msg.attach(MIMEText(body, "html"))
 
     try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        # without a timeout an unresponsive mail server blocks the booking turn forever
+        # (and the conversation with it, since its turns run one at a time)
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=SMTP_TIMEOUT_SECONDS) as server:
             server.login(gmail_user, gmail_password)
             server.sendmail(gmail_user, owner_email, msg.as_string())
         logger.info("Booking email sent to %s", owner_email)
