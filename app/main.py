@@ -126,24 +126,13 @@ def business():
     """Public details for the frontend, so it isn't hardcoded to one business."""
     return {"name": BIZ_CONFIG["business_name"]}
 
+# fields /bookings returns, read by column name (raw_data stays internal)
+BOOKING_FIELDS = ("id", "session_id", "business", "name", "phone", "email", "date", "time",
+                  "service", "status", "created_at")
+
 @app.get("/bookings", dependencies=[Depends(require_admin)])
 def list_bookings():
-    rows = get_all_bookings()
-    bookings = []
-    for row in rows:
-        bookings.append({
-            "id": row[0],
-            "session_id": row[1],
-            "business": row[2],
-            "name": row[3],
-            "phone": row[4],
-            "email": row[5],
-            "date": row[6],
-            "time": row[7],
-            "service": row[8],
-            "status": row[10],
-            "created_at": row[11]
-        })
+    bookings = [{field: row[field] for field in BOOKING_FIELDS} for row in get_all_bookings()]
     return {"total": len(bookings), "bookings": bookings}
 
 class ChatRequest(BaseModel):

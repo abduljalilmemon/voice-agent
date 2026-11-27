@@ -91,9 +91,11 @@ def save_booking(session_id: str, business_name: str, booking_data: dict) -> int
     logger.info("Saved booking #%s", booking_id)
     return booking_id
 
-def get_all_bookings() -> list:
+def get_all_bookings() -> list[dict]:
+    """All bookings, newest first, as dicts keyed by column name."""
     init_bookings_db()
     conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
     rows = conn.execute("SELECT * FROM bookings ORDER BY created_at DESC").fetchall()
     conn.close()
-    return rows
+    return [dict(row) for row in rows]

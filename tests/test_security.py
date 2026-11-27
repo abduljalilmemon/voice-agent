@@ -121,3 +121,23 @@ def test_business_endpoint_serves_the_configured_name(client, monkeypatch):
 
 def test_business_endpoint_exposes_only_public_details(client):
     assert set(client.get("/business").json()) == {"name"}
+
+
+# ── /bookings response shape (columns read by name, not position) ──
+
+def test_bookings_lists_saved_bookings_with_named_fields(client):
+    import app.integrations.booking_store as booking_store
+
+    booking_store.save_booking("session-1", "City Dental Clinic", {
+        "name": "Sara Khan", "phone": "03001234567", "email": "s@example.com",
+        "date": "2026-11-27", "time": "10:00", "service": "cleaning"})
+    body = client.get("/bookings", headers=ADMIN).json()
+    assert body["total"] == 1
+    booking = body["bookings"][0]
+    created_at = booking.pop("created_at")
+    assert booking == {
+        "id": 1, "session_id": "session-1", "business": "City Dental Clinic", "name": "Sara Khan",
+        "phone": "03001234567", "email": "s@example.com", "date": "2026-11-27", "time": "10:00",
+        "service": "cleaning", "status": "confirmed",
+    }
+    assert created_at.startswith("20")  # an ISO timestamp; raw_data is never exposed
