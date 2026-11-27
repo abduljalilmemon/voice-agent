@@ -110,3 +110,14 @@ def test_rate_limiter_window_slides(monkeypatch):
     assert limiter.allow("other-ip")  # limits are per client
     now[0] += 61
     assert limiter.allow("ip")        # old events expired
+
+
+# ── Public business details ────────────────────────────────────
+
+def test_business_endpoint_serves_the_configured_name(client, monkeypatch):
+    monkeypatch.setitem(main.BIZ_CONFIG, "business_name", "Smile Studio")
+    assert client.get("/business").json() == {"name": "Smile Studio"}
+
+
+def test_business_endpoint_exposes_only_public_details(client):
+    assert set(client.get("/business").json()) == {"name"}

@@ -121,6 +121,11 @@ def root():
 def health():
     return {"status": "healthy"}
 
+@app.get("/business")
+def business():
+    """Public details for the frontend, so it isn't hardcoded to one business."""
+    return {"name": BIZ_CONFIG["business_name"]}
+
 @app.get("/bookings", dependencies=[Depends(require_admin)])
 def list_bookings():
     rows = get_all_bookings()

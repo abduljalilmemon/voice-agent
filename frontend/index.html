@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>City Dental -- AI Assistant</title>
+    <title>AI Assistant</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: Arial, sans-serif; background: #f0f4f8; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
@@ -49,7 +49,7 @@
 <body>
 <div class="container">
     <div class="header">
-        <h2>City Dental Clinic</h2>
+        <h2 id="business-name">AI Assistant</h2>
         <p>AI Assistant -- Available 24/7</p>
     </div>
 
@@ -83,6 +83,15 @@
 
 <script>
     const sessionId = crypto.randomUUID();
+    // the business name comes from the server's config, so this page works for any business
+    const business = fetch("/business")
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .catch(() => ({ name: null }));   // keep the neutral "AI Assistant" page
+    business.then((b) => {
+        if (!b.name) return;
+        document.title = `${b.name} -- AI Assistant`;
+        document.getElementById("business-name").textContent = b.name;
+    });
     // connect back to whichever host served this page (works for localhost, 127.0.0.1, a domain, https)
     const WS_BASE = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
     let mediaRecorder = null;
@@ -119,8 +128,10 @@
             statusTextEl.className = "status connected";
             setTextInput(true);
             if (!greeted) {
-                addMessage("agent", "Hello! Welcome to City Dental Clinic. How can I help you today?");
                 greeted = true;
+                business.then((b) => addMessage("agent", b.name
+                    ? `Hello! Welcome to ${b.name}. How can I help you today?`
+                    : "Hello! How can I help you today?"));
             }
         };
         textWs.onclose = (event) => {
