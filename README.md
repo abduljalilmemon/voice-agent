@@ -51,7 +51,7 @@ Agent:   You're booked for a cleaning this Friday at 10 AM, Sara. The clinic wil
   Edge TTS (free) / ElevenLabs / OpenAI for speech.
 - **Reproducible demo**: the GIF above is recorded from the real app and rendered by a script
   (Puppeteer, Whisper, HyperFrames, Remotion).
-- **Tested**: 108 offline unit tests (fake LLMs, a frozen clock, no API keys) and a Docker build in
+- **Tested**: 130 offline unit tests (fake LLMs, a frozen clock, no API keys) and a Docker build in
   GitHub Actions CI.
 
 ## Architecture
@@ -114,10 +114,25 @@ tokens and latency down, with no change in either eval. The booking rules added 
 and the validation results in the prompts) raised it to **1,442 tokens per turn** in the latest run
 (still 1.85 calls and a median 0.77 s, with both evals at 100%).
 
-A voice turn measured **6–8 seconds** end to end before the latest agent optimisations: speech-to-text
-~1.5–2 s, agent ~2.5 s, speech synthesis ~2–3 s (a few measurements on a home connection). The agent
-part is now a median 0.8 s in the conversation eval, so speech-to-text and synthesis dominate. Speech
-is not streamed yet; see [Limitations](#limitations).
+### Latency per stage
+
+Every turn is timed per stage and summarised at [`GET /metrics`](#api). From a real session on a
+freshly started server (5 text and 4 voice turns, Groq free tier, home connection, so a small sample):
+
+| Stage | p50 | p95 |
+|---|---|---|
+| **Voice turn, end to end** | **5.2 s** | 7.0 s |
+| ↳ speech-to-text (Deepgram) | 2.2 s | 2.4 s |
+| ↳ agent | 1.2 s | 1.5 s |
+| &nbsp;&nbsp;&nbsp;↳ understand (LLM) | 0.5 s | 1.0 s |
+| &nbsp;&nbsp;&nbsp;↳ knowledge lookup | 0.12 s | 0.23 s |
+| &nbsp;&nbsp;&nbsp;↳ reply (LLM) | 0.5 s | 0.7 s |
+| ↳ text-to-speech (Edge TTS) | 1.7 s | 3.1 s |
+| **Text turn, end to end** | **1.2 s** | 1.4 s |
+
+The metrics found a cold start: the first turn after a restart spent 2.1 s loading the embedding
+model, so the server now loads it during startup (agent p95 3.7 s → 1.5 s). Speech-to-text and
+synthesis now take most of a voice turn, and neither is streamed yet; see [Limitations](#limitations).
 
 ## Quick start
 
@@ -160,7 +175,7 @@ All settings live in `.env`; [`.env.example`](.env.example) lists every one. The
 | `OWNER_EMAIL`, `GMAIL_USER`, `GMAIL_APP_PASSWORD` | Booking notification emails (skipped if unset) |
 | `ADMIN_API_KEY` | Required `X-API-Key` header for `GET /bookings` (endpoint disabled if unset) |
 | `CORS_ORIGINS`, `RATE_LIMIT_PER_MINUTE` | Extra allowed browser origins; agent turns per minute per IP (default 20) |
-| `LOG_LEVEL` | `INFO` by default; `DEBUG` also logs messages, transcripts and booking data |
+| `LOG_LEVEL` | `INFO` by default (one timing line per turn); `DEBUG` also logs messages, transcripts and booking data |
 
 ### Using it for another business
 
@@ -179,6 +194,7 @@ All settings live in `.env`; [`.env.example`](.env.example) lists every one. The
 | `WS` | `/ws/{session_id}` | Text chat. Send `{"message": "..."}`, receive `typing` / `message` / `error` events |
 | `WS` | `/ws/voice/{session_id}` | Voice chat. Send recorded audio (webm), receive `status`, `transcript`, `reply`, `audio` (base64 mp3) and `error` events |
 | `GET` | `/bookings` | All bookings. Requires `X-API-Key: <ADMIN_API_KEY>` |
+| `GET` | `/metrics` | p50 / p95 / max latency per stage over the last 500 samples. Requires `X-API-Key` |
 | `GET` | `/health` | Health check |
 | `GET` | `/docs` | Interactive OpenAPI docs |
 
@@ -193,7 +209,7 @@ curl localhost:8000/bookings -H "X-API-Key: $ADMIN_API_KEY"
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                 # 108 tests, offline: fake LLMs, temp storage, no API keys or email
+pytest                 # 130 tests, offline: fake LLMs, temp storage, no API keys or email
 ruff check .
 
 # evals call the real LLM configured in .env and use API credits
@@ -241,5 +257,4 @@ These are known gaps, listed here rather than hidden:
 - [ ] Streaming speech-to-text and text-to-speech, with interruption and no push-to-talk
 - [ ] Google Calendar integration for real appointment slots
 - [ ] Twilio integration for real phone calls
-- [ ] Per-stage latency metrics
 - [ ] PostgreSQL for multi-instance deployments
