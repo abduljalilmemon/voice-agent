@@ -6,6 +6,9 @@ from pydantic import BaseModel, ValidationError
 
 load_dotenv()
 
+# per-call limit: replies normally take under a second, and retries wrap each call
+LLM_TIMEOUT_SECONDS = 20
+
 # Default model per provider -- override any of them with LLM_MODEL in .env
 DEFAULT_MODELS = {
     "anthropic": "claude-haiku-5-5",
@@ -29,17 +32,18 @@ def get_llm(temperature: float = 0.7, schema: type[BaseModel] | None = None, rea
         from langchain_anthropic import ChatAnthropic
         # Current Claude models reject non-default temperature, so it is not passed.
         # Low effort keeps thinking short -- replies are spoken, so latency matters most.
-        llm = ChatAnthropic(model=model, effort=os.getenv("ANTHROPIC_EFFORT", "low"))
+        llm = ChatAnthropic(model=model, effort=os.getenv("ANTHROPIC_EFFORT", "low"), timeout=LLM_TIMEOUT_SECONDS)
     elif provider == "openai":
         from langchain_openai import ChatOpenAI
-        llm = ChatOpenAI(model=model, temperature=temperature)
+        llm = ChatOpenAI(model=model, temperature=temperature, timeout=LLM_TIMEOUT_SECONDS)
     elif provider == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI
-        llm = ChatGoogleGenerativeAI(model=model, temperature=temperature)
+        llm = ChatGoogleGenerativeAI(model=model, temperature=temperature, timeout=LLM_TIMEOUT_SECONDS)
     else:  # groq
         from langchain_groq import ChatGroq
         extra = {"reasoning_effort": reasoning_effort} if reasoning_effort and "gpt-oss" in model else {}
-        llm = ChatGroq(model=model, temperature=temperature, groq_api_key=os.getenv("GROQ_API_KEY"), **extra)
+        llm = ChatGroq(model=model, temperature=temperature, groq_api_key=os.getenv("GROQ_API_KEY"),
+                       timeout=LLM_TIMEOUT_SECONDS, **extra)
 
     retry_on: tuple[type[Exception], ...] = ()
     if schema is not None:

@@ -235,3 +235,72 @@ def test_groq_calls_retry_rate_limits():
     from app.llm import get_llm
 
     assert GroqRateLimitError in get_llm().retry_exception_types
+
+
+# ── Every external call has an explicit time limit ─────────────
+
+def _unwrap(runnable):
+    """Peel retry wrappers off to reach the chat model."""
+    while hasattr(runnable, "bound"):
+        runnable = runnable.bound
+    return runnable
+
+
+def test_groq_calls_have_a_timeout():
+    from app.llm import LLM_TIMEOUT_SECONDS, get_llm
+
+    assert _unwrap(get_llm()).request_timeout == LLM_TIMEOUT_SECONDS
+
+
+def test_claude_calls_have_a_timeout(monkeypatch):
+    from app.llm import LLM_TIMEOUT_SECONDS, get_llm
+
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-not-real")
+    assert _unwrap(get_llm()).default_request_timeout == LLM_TIMEOUT_SECONDS
+
+
+def test_deepgram_calls_have_a_timeout(monkeypatch):
+    calls = _deepgram(monkeypatch, ["hello"])
+    stt.transcribe_audio_bytes(b"audio")
+    assert calls[0]["request_options"] == {"timeout_in_seconds": stt.STT_TIMEOUT_SECONDS}
+
+
+def test_edge_tts_has_a_chunk_timeout(monkeypatch):
+    import asyncio
+
+    import edge_tts
+
+    from app.voice import tts
+
+    seen = {}
+
+    class FakeCommunicate:
+        def __init__(self, text, voice, **kwargs):
+            seen.update(kwargs)
+
+        async def stream(self):
+            yield {"type": "audio", "data": b"mp3"}
+
+    monkeypatch.setattr(edge_tts, "Communicate", FakeCommunicate)
+    monkeypatch.setattr(tts, "TTS_PROVIDER", "edge")
+    assert asyncio.run(tts.text_to_speech_bytes("hi")) == b"mp3"
+    assert seen["receive_timeout"] == tts.TTS_TIMEOUT_SECONDS
+
+
+def test_a_hanging_text_to_speech_call_is_cut_off(monkeypatch):
+    import asyncio
+    import time
+
+    from app.voice import tts
+
+    async def hangs(text):
+        await asyncio.sleep(60)
+
+    monkeypatch.setattr(tts, "_edge_tts", hangs)
+    monkeypatch.setattr(tts, "TTS_PROVIDER", "edge")
+    monkeypatch.setattr(tts, "TTS_TIMEOUT_SECONDS", 0.2)
+    started = time.perf_counter()
+    with pytest.raises(TimeoutError):
+        asyncio.run(tts.text_to_speech_bytes("hi"))
+    assert time.perf_counter() - started < 5

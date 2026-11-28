@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 TTS_PROVIDER = os.getenv("TTS_PROVIDER", "edge")
+TTS_TIMEOUT_SECONDS = 20  # synthesis normally takes 2-3 s
 
 # Voice config per provider
 VOICES = {
@@ -22,7 +23,8 @@ async def text_to_speech_bytes(text: str) -> bytes:
     provider = TTS_PROVIDER.lower()
 
     if provider == "edge":
-        return await _edge_tts(text)
+        # receive_timeout only bounds the gap between chunks, so also cap the whole synthesis
+        return await asyncio.wait_for(_edge_tts(text), timeout=TTS_TIMEOUT_SECONDS)
     elif provider == "elevenlabs":
         return await asyncio.to_thread(_elevenlabs_tts, text)
     elif provider == "openai":
@@ -43,7 +45,7 @@ def text_to_speech(text: str, output_path: str = "output.mp3") -> str:
 async def _edge_tts(text: str) -> bytes:
     import edge_tts
     voice = os.getenv("EDGE_VOICE", VOICES["edge"])
-    communicate = edge_tts.Communicate(text, voice)
+    communicate = edge_tts.Communicate(text, voice, receive_timeout=TTS_TIMEOUT_SECONDS)
     chunks = []
     async for chunk in communicate.stream():
         if chunk["type"] == "audio":
@@ -58,7 +60,7 @@ def _elevenlabs_tts(text: str) -> bytes:
     from elevenlabs import VoiceSettings
     from elevenlabs.client import ElevenLabs
     voice_id = os.getenv("ELEVENLABS_VOICE_ID", VOICES["elevenlabs"])
-    client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
+    client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"), timeout=TTS_TIMEOUT_SECONDS)
     audio = client.text_to_speech.convert(
         text=text,
         voice_id=voice_id,
@@ -83,7 +85,7 @@ def _elevenlabs_tts(text: str) -> bytes:
 def _openai_tts(text: str) -> bytes:
     from openai import OpenAI
     voice = os.getenv("OPENAI_VOICE", VOICES["openai"])
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), timeout=TTS_TIMEOUT_SECONDS)
     response = client.audio.speech.create(
         model="tts-1",
         voice=voice,

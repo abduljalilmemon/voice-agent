@@ -13,6 +13,7 @@ def get_deepgram_client():
     return DeepgramClient(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
 STT_ATTEMPTS = 2  # one retry: dropped connections to Deepgram are usually transient
+STT_TIMEOUT_SECONDS = 15  # transcription normally takes 1.5-2.5 s
 
 def transcribe_audio_bytes(audio_bytes: bytes, mimetype: str = "audio/webm") -> str:
     """Transcribe raw audio bytes and return transcript."""
@@ -25,7 +26,8 @@ def transcribe_audio_bytes(audio_bytes: bytes, mimetype: str = "audio/webm") -> 
                 model="nova-2",
                 language="en-US",
                 smart_format=True,
-                punctuate=True
+                punctuate=True,
+                request_options={"timeout_in_seconds": STT_TIMEOUT_SECONDS},
             )
             break
         except httpx.TransportError as e:  # network-level failure, not an API error
