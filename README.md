@@ -110,7 +110,9 @@ conversations early, so fewer checks ran.
 Merging intent classification and booking extraction cut calls and latency more than tokens: the
 merged prompt and its JSON schema are sent on every turn, while the old extractor only ran on
 booking turns. Low reasoning effort on the merged call (it only labels one message) is what brought
-tokens and latency down, with no change in either eval.
+tokens and latency down, with no change in either eval. The booking rules added later (today's date
+and the validation results in the prompts) raised it to **1,442 tokens per turn** in the latest run
+(still 1.85 calls and a median 0.77 s, with both evals at 100%).
 
 A voice turn measured **6–8 seconds** end to end before the latest agent optimisations: speech-to-text
 ~1.5–2 s, agent ~2.5 s, speech synthesis ~2–3 s (a few measurements on a home connection). The agent
