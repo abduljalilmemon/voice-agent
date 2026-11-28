@@ -40,6 +40,9 @@ def frozen_clock_and_fresh_bookings(monkeypatch, tmp_path):
     monkeypatch.setattr(responder_node, "now_local", lambda: NOW)
     monkeypatch.setattr(booking_store, "DB_PATH", str(tmp_path / "bookings.db"))
 
+    from app.metrics import metrics
+    metrics.reset()  # latency samples are process-wide; start each test empty
+
 
 @pytest.fixture
 def fake_llms(monkeypatch):

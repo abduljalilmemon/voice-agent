@@ -1,3 +1,4 @@
+import functools
 import sqlite3
 
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -9,7 +10,16 @@ from app.agent.nodes.retriever import knowledge_retriever
 from app.agent.nodes.understand import understand
 from app.agent.state import AgentState
 from app.config import storage_path
+from app.metrics import metrics
 
+
+def _timed(stage: str, node):
+    """Record each step's duration as agent.<stage> in the latency metrics."""
+    @functools.wraps(node)
+    def timed_node(state: AgentState) -> AgentState:
+        with metrics.timer(f"agent.{stage}"):
+            return node(state)
+    return timed_node
 
 def route_after_retrieval(state: AgentState) -> str:
     # save once: never again after a booking_id exists
@@ -25,10 +35,10 @@ def build_graph(checkpointer=None):
     """
     graph = StateGraph(AgentState)
 
-    graph.add_node("understand", understand)
-    graph.add_node("knowledge_retriever", knowledge_retriever)
-    graph.add_node("booking_saver", save_completed_booking)
-    graph.add_node("response_generator", generate_response)
+    graph.add_node("understand", _timed("understand", understand))
+    graph.add_node("knowledge_retriever", _timed("knowledge", knowledge_retriever))
+    graph.add_node("booking_saver", _timed("save_booking", save_completed_booking))
+    graph.add_node("response_generator", _timed("reply", generate_response))
 
     graph.set_entry_point("understand")
     graph.add_edge("understand", "knowledge_retriever")
